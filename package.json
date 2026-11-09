@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-peek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Shell-style prompt recall with a Markdown answer preview for the DeepSeek Harness web composer.",
   "license": "MIT",
@@ -9,6 +9,9 @@
     "url": "git+https://github.com/tobesayaka/dsh-prompt-peek.git"
   },
   "homepage": "https://github.com/tobesayaka/dsh-prompt-peek#readme",
+  "bugs": {
+    "url": "https://github.com/tobesayaka/dsh-prompt-peek/issues"
+  },
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -18,6 +21,9 @@
     "composer",
     "markdown"
   ],
+  "scripts": {
+    "check": "node --check client.js && node --check index.js"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -29,7 +35,8 @@
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "CHANGELOG.md"
   ],
   "dsh": {
     "bundle": {

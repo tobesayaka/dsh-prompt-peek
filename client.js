@@ -10,6 +10,7 @@ window.__ModuleLoader__.load({
     const MAX_REPLY = 6000;
     const REPLY_TAIL = 400;
     const PREVIEW_PAGE = 180;
+    const PREVIEW_SCROLL_TAU = 100;
     const EMPTY = [];
 
     const ROOT_STYLE = {
@@ -453,6 +454,7 @@ window.__ModuleLoader__.load({
             hintSelect: '选择',
             hintPreview: '预览',
             hintHidePreview: '收起',
+            hintTypeSpace: '输入空格',
             hintPage: '翻页',
             hintInsert: '填入',
             hintClose: '取消',
@@ -470,6 +472,7 @@ window.__ModuleLoader__.load({
             hintSelect: 'select',
             hintPreview: 'preview',
             hintHidePreview: 'hide',
+            hintTypeSpace: 'type space',
             hintPage: 'page',
             hintInsert: 'insert',
             hintClose: 'cancel',
@@ -504,6 +507,7 @@ window.__ModuleLoader__.load({
           const rootRef = React.useRef(null);
           const panelRef = React.useRef(null);
           const previewRef = React.useRef(null);
+          const scrollAnimRef = React.useRef({ frame: 0, target: 0 });
           const inputRef = React.useRef(null);
           const listRef = React.useRef(null);
           const editorRef = React.useRef(null);
@@ -755,6 +759,96 @@ window.__ModuleLoader__.load({
             setPreviewText((previous) => (previous === next ? previous : next));
           }, [previewOpen, matches, selected]);
 
+          /** Cancel a preview scroll animation that is still running. */
+          const stopPreviewScroll = () => {
+            const animation = scrollAnimRef.current;
+            if (animation.frame !== 0) {
+              cancelAnimationFrame(animation.frame);
+              animation.frame = 0;
+            }
+          };
+
+          /**
+           * Glide the preview by `delta` pixels instead of jumping. Discrete presses queue onto
+           * the running target, while a held key only keeps one page of lead so it cannot race
+           * ahead; a wheel or a drag cancels the glide so the reader never fights it.
+           */
+          const scrollPreviewBy = (delta, repeat) => {
+            const scroller = previewRef.current;
+            if (scroller === null || scroller === undefined) return;
+            const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            if (limit <= 0) return;
+            const animation = scrollAnimRef.current;
+            animation.held = repeat === true;
+            const running = animation.frame !== 0;
+            // A held key repeats far faster than the glide can move, so a repeat only ever
+            // keeps one page of lead; discrete presses may queue up.
+            const from = running && !repeat ? animation.target : scroller.scrollTop;
+            const target = Math.max(0, Math.min(limit, from + delta));
+            animation.target = target;
+            if (Math.abs(target - scroller.scrollTop) < 1) {
+              scroller.scrollTop = target;
+              return;
+            }
+            const reduced = typeof window !== 'undefined'
+              && typeof window.matchMedia === 'function'
+              && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduced) {
+              stopPreviewScroll();
+              scroller.scrollTop = target;
+              return;
+            }
+            if (animation.frame !== 0) return;
+            let previous = performance.now();
+            const step = (now) => {
+              const el = previewRef.current;
+              if (el === null || el === undefined) {
+                animation.frame = 0;
+                return;
+              }
+              const elapsed = Math.min(64, Math.max(0, now - previous));
+              previous = now;
+              // Reflow can shorten the reply mid-glide; retarget so the loop always terminates.
+              animation.target = Math.min(animation.target, Math.max(0, el.scrollHeight - el.clientHeight));
+              const remaining = animation.target - el.scrollTop;
+              if (Math.abs(remaining) < 1) {
+                el.scrollTop = animation.target;
+                animation.frame = 0;
+                return;
+              }
+              const advance = Math.max(1, remaining * (1 - Math.exp(-elapsed / PREVIEW_SCROLL_TAU)));
+              // Browsers round scrollTop, so a sub-pixel final step could otherwise stall.
+              el.scrollTop += remaining > 0 ? advance : -advance;
+              animation.frame = requestAnimationFrame(step);
+            };
+            animation.frame = requestAnimationFrame(step);
+          };
+
+          const onQueryKeyUp = (event) => {
+            const key = typeof event.key === 'string' ? event.key : '';
+            if (key !== 'PageDown' && key !== 'PageUp') return;
+            const animation = scrollAnimRef.current;
+            if (animation.held !== true) return;
+            animation.held = false;
+            stopPreviewScroll();
+          };
+
+          React.useEffect(() => stopPreviewScroll, [selected, previewOpen, previewText]);
+
+          React.useEffect(() => {
+            if (!previewVisible) return;
+            const scroller = previewRef.current;
+            if (scroller === null || scroller === undefined) return;
+            scroller.addEventListener('wheel', stopPreviewScroll, { passive: true });
+            scroller.addEventListener('touchstart', stopPreviewScroll, { passive: true });
+            scroller.addEventListener('pointerdown', stopPreviewScroll);
+            return () => {
+              scroller.removeEventListener('wheel', stopPreviewScroll);
+              scroller.removeEventListener('touchstart', stopPreviewScroll);
+              scroller.removeEventListener('pointerdown', stopPreviewScroll);
+            };
+          }, [previewVisible]);
+
           const onQueryKeyDown = (event) => {
             const native = event.nativeEvent;
             if (native !== undefined && native !== null && (native.isComposing === true || native.keyCode === 229)) return;
@@ -765,7 +859,8 @@ window.__ModuleLoader__.load({
               closeSearch(true);
               return;
             }
-            if (key === ' ' && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+            if ((key === ' ' || key === 'Spacebar') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+              if (event.shiftKey) return;
               if (matchesRef.current.length === 0) return;
               event.preventDefault();
               event.stopPropagation();
@@ -773,11 +868,9 @@ window.__ModuleLoader__.load({
               return;
             }
             if (previewVisible && (key === 'PageDown' || key === 'PageUp')) {
-              const scroller = previewRef.current;
-              if (scroller === null || scroller === undefined) return;
               event.preventDefault();
               event.stopPropagation();
-              scroller.scrollTop += key === 'PageDown' ? PREVIEW_PAGE : -PREVIEW_PAGE;
+              scrollPreviewBy(key === 'PageDown' ? PREVIEW_PAGE : -PREVIEW_PAGE, event.repeat === true);
               return;
             }
             if (key === 'ArrowDown' || key === 'ArrowUp') {
@@ -855,6 +948,7 @@ window.__ModuleLoader__.load({
                   spellCheck: false,
                   onChange: (event) => setPanel({ query: event.target.value, selected: 0 }),
                   onKeyDown: onQueryKeyDown,
+                  onKeyUp: onQueryKeyUp,
                 }),
               ),
               h('div', { ref: listRef, id: 'dsh-pp-listbox', className: 'dsh-pp-list', role: 'listbox' },
@@ -870,7 +964,8 @@ window.__ModuleLoader__.load({
               ) : null,
               h('div', { className: 'dsh-pp-hint' },
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('↑'), keycap('↓'), translate('hintSelect')),
-                h('span', { className: 'dsh-pp-hint__group' }, keycap('Ctrl'), keycap(translate('keySpace')), translate(previewVisible ? 'hintHidePreview' : 'hintPreview')),
+                h('span', { className: 'dsh-pp-hint__group' }, keycap(translate('keySpace')), translate(previewVisible ? 'hintHidePreview' : 'hintPreview')),
+                h('span', { className: 'dsh-pp-hint__group' }, keycap('Shift'), keycap(translate('keySpace')), translate('hintTypeSpace')),
                 previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, keycap('PgUp'), keycap('PgDn'), translate('hintPage')) : null,
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Enter'), translate('hintInsert')),
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Esc'), translate('hintClose')),
