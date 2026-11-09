@@ -1,10 +1,12 @@
 # dsh-prompt-peek
 
+**English** | [简体中文](README.zh-CN.md)
+
 **Shell-style prompt recall with a Markdown answer preview for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web composer.**
 
 Press `↑` in an empty composer to get the last message you sent back. Keep pressing to walk further back, `↓` to come forward. `Ctrl+R` searches the session's prompts, and `Space` peeks at the reply dsh gave you at the time.
 
-> **中文速览**：在 DSH 输入框里按 `↑` 翻回上一条你发过的消息，`Ctrl+R` 按关键词搜索；选中后按 `空格` 预览当时的回答，`Shift+空格` 在搜索框里输入空格。
+> **中文速览**：在 DSH 输入框里按 `↑` 翻回上一条你发过的消息，`Ctrl+R` 按关键词搜索；选中后按 `空格` 预览当时的回答，`Shift+空格` 在搜索框里输入空格。完整的[中文文档](README.zh-CN.md)在这里。
 
 ## Features
 
@@ -62,28 +64,35 @@ The plugin registers one entry in the `conversation.input.overlay` slot of the c
 
 History comes from `sessions.binding(sessionId).eventSource`: `user/message` events with `source.kind === 'user'`, in order. The reply preview walks forward from that message to the next human message and collects `assistant/message` text blocks.
 
-No build step and no dependencies: the whole client half is plain JavaScript in `client.js`, including a small Markdown renderer and the preview scroll animation, because plugin code must not import other Harness client packages.
+No build step and no dependencies: the whole client half is plain JavaScript in `src/client.js`, including a small Markdown renderer and the preview scroll animation, because plugin code must not import other Harness client packages.
 
 ## Project layout
 
 ```
-README.md            this file
-CHANGELOG.md         release notes
-LICENSE              MIT
-.editorconfig        editor defaults
-package.json         bundle + client descriptors, display metadata exports
-cordis.patch.yml     the loader row this bundle inserts
-index.js             host half (no host behavior)
-client.js            slot entry, keyboard handling, Markdown renderer, styles
-locale/en.json       plugin-list title and description (English)
-locale/zh.json       plugin-list title and description (Chinese)
-icon.svg             plugin-list icon
+dsh-prompt-peek/
+├── src/
+│   ├── index.js
+│   └── client.js
+├── locale/
+│   ├── en.json
+│   └── zh.json
+├── assets/
+│   └── icon.svg
+├── README.md
+├── README.zh-CN.md
+├── CHANGELOG.md
+├── LICENSE
+├── .editorconfig
+├── package.json
+└── cordis.patch.yml
 ```
+
+`src/index.js` is the host half (it has no behavior today); `src/client.js` is the client entry with the keyboard handling, Markdown renderer, and styles. `locale/` serves both the plugin-list metadata and the document selected for the plugin detail page.
 
 ## Development
 
 1. Install the bundle from this directory.
-2. Edit `client.js`.
+2. Edit `src/client.js`.
 3. Reload the client module: disable and re-enable the bundle in the Plugins page (HMR recommends it), or reload the page / restart DSH when the host cannot recompose.
 
 There is no test runner yet. `npm run check` runs `node --check` over the JavaScript entry points, and the locale JSON files can be parsed with `node -e`; the Markdown renderer is a pure function that can be exercised with a `React.createElement` stub.

@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.2 - 2026-11-09
+
+### Added
+
+- Complete Simplified Chinese documentation in `README.zh-CN.md`, linked from
+  the English README and selected for the Chinese plugin detail page.
+
+### Changed
+
+- Move the host and client entries into `src/` and the icon into `assets/`, and
+  update the package exports, files list, and `npm run check` paths.
+- Declare the manifest `icon`, export `./package.json`, and add localized
+  `meta.detail` so the plugin list and detail page can read the package metadata.
+- No runtime behavior changes.
+
 ## 0.1.1 - 2026-11-09
 
 ### Changed
