@@ -12,7 +12,7 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 
 - **Recall** — the arrow keys walk the prompts you actually sent in the current session, newest first. Consecutive duplicates are folded; messages sent before the plugin was installed are included.
 - **Search** — `Ctrl+R` opens a floating panel above the composer with the prompt list, live filtering, and match highlighting. The query field is a real input, so Chinese/Japanese IME input works.
-- **Preview** — `Space` on a selected prompt renders the *answer* dsh produced for that turn: the closing assistant text, with tool calls and reasoning left out, formatted as Markdown (headings, lists, task lists, quotes, fenced code with a language label, tables with alignment, links restricted to safe schemes).
+- **Preview** — `Space` on a selected prompt renders the *answer* dsh produced for that turn: the closing assistant text, with tool calls and reasoning left out, formatted as Markdown (headings, lists, task lists, quotes, fenced code, tables with alignment, links restricted to safe schemes). Fenced code is rendered by the host's own Shiki-based `CodeBlock`, so it is syntax highlighted in both themes and keeps the language label plus the copy and wrap controls of a chat reply.
 - **Smooth paging** — `PgUp` / `PgDn` glide through a long reply instead of jumping. Consecutive presses join into one motion, wheel, touch, or scrollbar input takes over immediately, and `prefers-reduced-motion` falls back to a direct jump.
 - **Zero footprint** — no data is written anywhere and no request leaves the machine. History is read from the session's own event window on demand.
 
@@ -64,7 +64,7 @@ The plugin registers one entry in the `conversation.input.overlay` slot of the c
 
 History comes from `sessions.binding(sessionId).eventSource`: `user/message` events with `source.kind === 'user'`, in order. The reply preview walks forward from that message to the next human message and collects `assistant/message` text blocks.
 
-No build step and no dependencies: the whole client half is plain JavaScript in `src/client.js`, including a small Markdown renderer and the preview scroll animation, because plugin code must not import other Harness client packages.
+No build step and no dependencies: the whole client half is plain JavaScript in `src/client.js`, including the Markdown renderer and the preview scroll animation. It reaches the host only through the web shell's frozen platform module table — `react` for the UI and `@deepseek-ai/dsh-client-ui-primitives` for the shared `CodeBlock`; when a host does not expose that component, the preview falls back to a plain `<pre>` with a language label.
 
 ## Project layout
 
@@ -101,7 +101,6 @@ There is no test runner yet. `npm run check` runs `node --check` over the JavaSc
 
 - History covers the **loaded** part of the session's event window, not the entire lifetime of a very long thread.
 - History is **per session**; a brand-new session starts empty.
-- Code blocks get a language label but no syntax highlighting.
 - The Markdown subset is intentionally flat: no nested lists, no raw HTML, no images.
 - `Ctrl+R`/`Cmd+R` are only intercepted while the composer has keyboard focus; the browser reloads normally everywhere else.
 

@@ -4,6 +4,31 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    /**
+     * The shared code block from the host's primitive library. It tokenizes with
+     * the app's own Shiki instance (loading grammars on demand) and installs the
+     * copy and wrap controls, so the preview highlights code exactly like a chat
+     * reply. Older hosts without that export keep the plain `<pre>` fallback.
+     */
+    let CodeBlock = null;
+    try {
+      const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+      if (primitives !== null && primitives !== undefined && typeof primitives.CodeBlock === 'function') {
+        CodeBlock = primitives.CodeBlock;
+      }
+    } catch (error) {
+      CodeBlock = null;
+    }
+
+    /** Copy and wrap captions used when no locale dictionary is available. */
+    const CODE_LABELS = {
+      copy: 'Copy',
+      copied: 'Copied',
+      code: 'Code',
+      wrap: 'Wrap lines',
+      unwrap: 'Unwrap lines',
+    };
+
     const NS = 'dsh-prompt-peek';
     const MAX_HISTORY = 300;
     const MAX_RESULTS = 50;
@@ -69,6 +94,10 @@ window.__ModuleLoader__.load({
 .dsh-pp-md__pre{position:relative;margin:0 0 6px;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);border:0.5px solid var(--dsw-alias-border-l1);overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;white-space:pre}
 .dsh-pp-md__pre code{font:inherit;white-space:pre}
 .dsh-pp-md__lang{position:absolute;top:4px;right:8px;font-size:9.5px;line-height:12px;color:var(--dsw-alias-label-secondary);opacity:.8;pointer-events:none;text-transform:lowercase;font-family:inherit}
+.dsh-pp-md .dsh-pp-md__codeblock{--dsl-code-block-border-radius:8px;margin:0 0 6px}
+.dsh-pp-md .dsh-pp-md__codeblock>:has(>[data-code-block-banner]){position:static;z-index:auto}
+.dsh-pp-md .dsh-pp-md__codeblock [data-code-block-banner]{padding:4px 10px}
+.dsh-pp-md .dsh-pp-md__codeblock pre{padding:8px 10px}
 .dsh-pp-md__quote{margin:0 0 6px;padding:2px 0 2px 9px;border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}
 .dsh-pp-md__link{color:var(--dsw-alias-brand-primary);text-decoration:none}
 .dsh-pp-md__link:hover{text-decoration:underline}
@@ -302,8 +331,31 @@ window.__ModuleLoader__.load({
       return MD_FENCE.test(line) || MD_HEADING.test(line) || MD_HR.test(line) || MD_QUOTE.test(line) || MD_UL.test(line) || MD_OL.test(line);
     }
 
+    /** One fenced block: the host's highlighted CodeBlock, or a plain `<pre>` on an older host. */
+    function renderCodeBlock(block, key, labels) {
+      if (CodeBlock === null) {
+        return h('pre', { key, className: 'dsh-pp-md__pre' },
+          block.lang === '' ? null : h('span', { className: 'dsh-pp-md__lang' }, block.lang),
+          h('code', null, block.text));
+      }
+      const captions = labels === null || labels === undefined ? CODE_LABELS : labels;
+      return h(CodeBlock, {
+        key,
+        className: 'dsh-pp-md__codeblock',
+        code: block.text + '\n',
+        lang: block.lang === '' ? undefined : block.lang,
+        copyLabel: captions.copy,
+        copiedLabel: captions.copied,
+        toolbarLabels: {
+          codeLabel: captions.code,
+          wrapLabel: captions.wrap,
+          unwrapLabel: captions.unwrap,
+        },
+      });
+    }
+
     /** Compact Markdown renderer for recorded replies: no HTML, links restricted to http(s), mailto, and anchors. */
-    function renderMarkdown(source) {
+    function renderMarkdown(source, labels) {
       const lines = String(source).replace(/\r\n?/gu, '\n').split('\n');
       const blocks = [];
       let index = 0;
@@ -393,9 +445,7 @@ window.__ModuleLoader__.load({
       const children = blocks.map((block, blockIndex) => {
         const key = 'md' + blockIndex;
         if (block.type === 'code') {
-          return h('pre', { key, className: 'dsh-pp-md__pre' },
-            block.lang === '' ? null : h('span', { className: 'dsh-pp-md__lang' }, block.lang),
-            h('code', null, block.text));
+          return renderCodeBlock(block, key, labels);
         }
         if (block.type === 'heading') {
           const level = Math.min(block.level, 3);
@@ -461,6 +511,11 @@ window.__ModuleLoader__.load({
             keySpace: '空格',
             previewTitle: 'dsh 的回答',
             previewMissing: '这一条在已加载的记录里没有文字回复。',
+            copyCode: '复制',
+            copiedCode: '已复制',
+            codeLabel: '代码',
+            wrapCode: '自动换行',
+            unwrapCode: '取消换行',
             browse: '历史',
             browseHint: '↑↓ 翻看 · Esc 退出',
           }), 'prompt-peek: zh dictionary');
@@ -479,6 +534,11 @@ window.__ModuleLoader__.load({
             keySpace: 'Space',
             previewTitle: "dsh's reply",
             previewMissing: 'No text reply is available in the loaded history.',
+            copyCode: 'Copy',
+            copiedCode: 'Copied',
+            codeLabel: 'Code',
+            wrapCode: 'Wrap lines',
+            unwrapCode: 'Unwrap lines',
             browse: 'History',
             browseHint: '↑↓ browse · Esc exit',
           }), 'prompt-peek: en dictionary');
@@ -492,7 +552,7 @@ window.__ModuleLoader__.load({
           const draft = useInput((state) => (state === undefined || state === null ? "" : state.draft));
           const phase = useInput((state) => (state === undefined || state === null ? "plain" : state.phase));
 
-          React.useSyncExternalStore(
+          const localeRevision = React.useSyncExternalStore(
             React.useCallback((notify) => {
               const current = ctx.get('locale');
               return current === undefined || current === null ? () => {} : current.subscribe(notify);
@@ -612,9 +672,16 @@ window.__ModuleLoader__.load({
           }, [panel, queryText, items]);
           matchesRef.current = matches;
           const selected = matches.length === 0 ? 0 : Math.min(panel.selected, matches.length - 1);
+          const codeLabels = React.useMemo(() => ({
+            copy: translate('copyCode'),
+            copied: translate('copiedCode'),
+            code: translate('codeLabel'),
+            wrap: translate('wrapCode'),
+            unwrap: translate('unwrapCode'),
+          }), [localeRevision]);
           const previewNodes = React.useMemo(
-            () => (previewText === null || previewText === undefined ? null : renderMarkdown(previewText)),
-            [previewText],
+            () => (previewText === null || previewText === undefined ? null : renderMarkdown(previewText, codeLabels)),
+            [previewText, codeLabels],
           );
           const previewVisible = previewOpen && matches.length > 0;
 

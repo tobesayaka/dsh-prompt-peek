@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 - 2026-11-09
+
+### Added
+
+- Syntax highlighting in the reply preview. Fenced code is rendered by the
+  host's shared `CodeBlock` (Shiki, on-demand grammars, light and dark theme
+  tokens) instead of a plain `<pre>`, so it also gains the language banner,
+  copy button, and wrap toggle of a chat reply.
+
+### Changed
+
+- The preview reads the shared `CodeBlock` from the web shell's platform module
+  table (`@deepseek-ai/dsh-client-ui-primitives`); hosts that do not expose it
+  still get the old plain code block with a language label.
+- Copy and wrap captions are localized in the plugin's zh/en dictionaries.
+
 ## 0.1.2 - 2026-11-09
 
 ### Added
