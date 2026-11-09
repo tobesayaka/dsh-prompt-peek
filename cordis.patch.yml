@@ -1,0 +1,3 @@
+- insert:
+    - id: prompt-peek
+      name: dsh-prompt-peek
