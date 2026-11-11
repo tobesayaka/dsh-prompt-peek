@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0 - 2026-11-11
+
+### Added
+
+- **A Settings section of its own.** The plugin registers a top-level
+  section in Settings — a sidebar row named *Prompt peek* between *Shell* and
+  *Built-in plugins*, with a globe icon — instead of a tab inside *Built-in
+  plugins*. It edits interface language (follow DSH / 中文 / English, a globe
+  menu that applies on choice), reply preview on or off, smooth paging, lines
+  per page, history limit, and result order; behavior changes apply to open
+  composers as soon as they are saved. Rows follow the built-in General
+  rows: title and description on the left, one control on the right.
+- A Host settings route, `GET` / `POST /api/prompt-peek.settings`, and a
+  `~/.dsh/prompt-peek/settings.json` document (mode `0600`) that stores only
+  those six fields. The route is registered in an optional child fiber that
+  requires Connection, so profiles without it still load the plugin. `cordis.patch.yml` stays the baseline; the file holds
+  overrides and "Reset to profile defaults" deletes it.
+- A mouse wheel over the search box pages the reply preview while it is open.
+- A footer note names the Settings page when the reply preview is turned off.
+
+### Changed
+
+- A pinned interface language switches the plugin's own copy without touching
+  DSH's language (and without a reload).
+- `PgUp` / `PgDn` move one configured page instead of a fixed 180 px, and a
+  long prompt widens its preview window to bring the first search match into
+  view instead of always showing the tail.
+- The overlay waits for the session binding before attaching, so a composer
+  that mounts early cannot lose its first rememberable message.
+- English README, Chinese README, and the locale files document the settings.
+- Host tests (`npm test`, `node:test`) cover validation, persistence, reset,
+  and malformed files against a temporary `DSH_HOME`.
+
 ## 0.2.0 - 2026-11-09
 
 ### Added

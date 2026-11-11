@@ -3,5 +3,6 @@
     "title": "Prompt peek",
     "description": "Recall sent messages with ArrowUp and ArrowDown, search them with Ctrl+R, and preview dsh's reply with Space, in the composer.",
     "detail": "README.md"
-  }
+  },
+  "settingsNav": "Prompt peek"
 }

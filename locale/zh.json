@@ -3,5 +3,6 @@
     "title": "输入框速览",
     "description": "在输入框中用 ↑/↓ 翻阅已发送的消息，用 Ctrl+R 搜索关键词，用 空格 预览当时的回答。",
     "detail": "README.zh-CN.md"
-  }
+  },
+  "settingsNav": "输入框速览"
 }

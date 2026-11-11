@@ -30,6 +30,8 @@ window.__ModuleLoader__.load({
     };
 
     const NS = 'dsh-prompt-peek';
+    const SETTINGS_NS = NS + '.settings';
+    const SETTINGS_ROUTE = '/api/prompt-peek.settings';
     const MAX_HISTORY = 300;
     const MAX_RESULTS = 50;
     const MAX_REPLY = 6000;
@@ -37,6 +39,200 @@ window.__ModuleLoader__.load({
     const PREVIEW_PAGE = 180;
     const PREVIEW_SCROLL_TAU = 100;
     const EMPTY = [];
+    /** Language ids the plugin can show, alongside their endonym labels. */
+    const LANGUAGE_LABELS = {
+      auto: { en: 'Follow the DSH interface', zh: '跟随 DSH 界面语言' },
+      en: { en: 'English', zh: 'English' },
+      zh: { en: '中文', zh: '中文' },
+    };
+
+    /**
+     * Copy for hosts whose locale service has no dictionary yet, or whose
+     * dictionary has not arrived. Also the reference key set for
+     * `strictDictionary`: the dictionary must stay a superset of the neutral
+     * baseline, so a host without the locale service still gets working copy.
+     */
+    const BASE_DICTIONARY = {
+      title: 'Search sent messages',
+      placeholder: 'Type to filter…',
+      empty: 'No matching messages',
+      emptyShort: 'No results',
+      hintSelect: 'select',
+      hintPreview: 'preview',
+      hintHidePreview: 'hide',
+      hintTypeSpace: 'type space',
+      hintPage: 'page',
+      hintWheel: 'scroll',
+      hintInsert: 'insert',
+      hintClose: 'cancel',
+      keySpace: 'Space',
+      previewTitle: "dsh's reply",
+      previewMissing: 'No text reply is available in the loaded history.',
+      previewOff: 'Reply preview is off',
+      copyCode: 'Copy',
+      copiedCode: 'Copied',
+      codeLabel: 'Code',
+      wrapCode: 'Wrap lines',
+      unwrapCode: 'Unwrap lines',
+      browse: 'History',
+      browseHint: '↑↓ browse · Esc exit',
+    };
+
+    /** Copy for the plugin's Settings section (sidebar row, icon title, groups, rows, buttons). */
+    function settingsDictionary(language) {
+      const label = (id) => LANGUAGE_LABELS[id][language];
+      if (language === 'zh') {
+        return {
+          settingsNav: '输入框速览',
+          settingsTitle: '输入框速览',
+          settingsIntro: '↑ / ↓ 翻历史、Ctrl+R 搜索、空格 预览回答时使用的偏好。只影响本插件，不改动 DSH 其他界面。',
+          sectionLanguage: '语言',
+          localeLabel: '界面语言',
+          localeHint: '选择插件面板使用的语言，或让它跟随 DSH 的界面语言。',
+          localeAuto: label('auto'),
+          localeZh: label('zh'),
+          localeEn: label('en'),
+          sectionBehavior: '行为',
+          showPreviewLabel: '显示回答预览',
+          showPreviewHint: '在搜索面板中按空格预览该提示词得到的回答。',
+          smoothScrollLabel: '平滑翻页',
+          smoothScrollHint: 'PgUp / PgDn 平滑滚动预览，而不是直接跳动。已为减少动态效果的系统强制关闭。',
+          previewPageSizeLabel: '每页行数',
+          previewPageSizeValue: '{value} 行',
+          previewPageSizeHint: 'PgUp / PgDn 以及鼠标滚轮每次移动的行数。',
+          historyLimitLabel: '历史条数上限',
+          historyLimitValue: '{value} 条',
+          historyLimitHint: '最多读取当前会话最近发送的多少条提示词。',
+          browseOrderLabel: '结果顺序',
+          browseOrderHint: '搜索列表从旧到新（与 ↑ / ↓ 翻阅方向一致），或像 Shell 那样从新到旧。',
+          browseOrderOldest: '从旧到新',
+          browseOrderNewest: '从新到旧',
+          save: '保存',
+          saving: '保存中…',
+          reset: '恢复配置默认值',
+          saved: '已保存',
+          loadFailed: '无法读取设置。',
+          saveFailed: '保存失败。',
+          invalidValue: '{field}：请输入 {min} 到 {max} 之间的整数。',
+          readOnly: '当前 profile 不可编辑设置。',
+          fields: {
+            locale: '界面语言',
+            showPreview: '显示回答预览',
+            smoothScroll: '平滑翻页',
+            previewPageSize: '每页行数',
+            historyLimit: '历史条数上限',
+            browseOrder: '结果顺序',
+          },
+        };
+      }
+      return {
+        settingsNav: 'Prompt peek',
+        settingsTitle: 'Prompt peek',
+        settingsIntro: 'Preferences for ↑ / ↓ recall, Ctrl+R search, and the Space preview. They only change this plugin, not the rest of DSH.',
+        sectionLanguage: 'Language',
+        localeLabel: 'Interface language',
+        localeHint: 'Pick the language of the plugin panels, or follow the DSH interface language.',
+        localeAuto: label('auto'),
+        localeZh: label('zh'),
+        localeEn: label('en'),
+        sectionBehavior: 'Behavior',
+        showPreviewLabel: 'Show reply preview',
+        showPreviewHint: 'Let Space reveal the reply that prompt received inside the search panel.',
+        smoothScrollLabel: 'Smooth paging',
+        smoothScrollHint: 'Let PgUp / PgDn glide through the preview instead of jumping. Systems that ask for reduced motion always jump.',
+        previewPageSizeLabel: 'Lines per page',
+        previewPageSizeValue: '{value} lines',
+        previewPageSizeHint: 'How far PgUp, PgDn, and the mouse wheel move the reply preview at a time.',
+        historyLimitLabel: 'History limit',
+        historyLimitValue: '{value} prompts',
+        historyLimitHint: 'Keep at most this many of the most recently sent prompts of the session.',
+        browseOrderLabel: 'Result order',
+        browseOrderHint: 'List matches oldest first, matching the ↑ / ↓ walk, or newest first like a shell history.',
+        browseOrderOldest: 'Oldest first',
+        browseOrderNewest: 'Newest first',
+        save: 'Save',
+        saving: 'Saving…',
+        reset: 'Reset to profile defaults',
+        saved: 'Saved',
+        loadFailed: 'Could not read the settings.',
+        saveFailed: 'Could not save the settings.',
+        invalidValue: '{field}: enter a whole number between {min} and {max}.',
+        readOnly: 'Settings are not editable in this profile.',
+        fields: {
+          locale: 'Interface language',
+          showPreview: 'Show reply preview',
+          smoothScroll: 'Smooth paging',
+          previewPageSize: 'Lines per page',
+          historyLimit: 'History limit',
+          browseOrder: 'Result order',
+        },
+      };
+    }
+
+    /**
+     * The copy of the composer surfaces for one language: the neutral English
+     * baseline plus the zh overrides. `auto` registers the zh table with the
+     * host so host-side copy (slot labels) follows DSH; a pinned language reads
+     * this table directly.
+     */
+    function composerDictionary(language) {
+      if (language !== 'zh') return BASE_DICTIONARY;
+      return {
+        ...BASE_DICTIONARY,
+        title: '搜索已发送的消息',
+        placeholder: '输入关键词…',
+        empty: '没有匹配的消息',
+        emptyShort: '无结果',
+        hintSelect: '选择',
+        hintPreview: '预览',
+        hintHidePreview: '收起',
+        hintTypeSpace: '输入空格',
+        hintPage: '翻页',
+        hintWheel: '滚动',
+        hintInsert: '填入',
+        hintClose: '取消',
+        keySpace: '空格',
+        previewTitle: 'dsh 的回答',
+        previewMissing: '这一条在已加载的记录里没有文字回复。',
+        previewOff: '回答预览已关闭',
+        copyCode: '复制',
+        copiedCode: '已复制',
+        codeLabel: '代码',
+        wrapCode: '自动换行',
+        unwrapCode: '取消换行',
+        browse: '历史',
+        browseHint: '↑↓ 翻看 · Esc 退出',
+      };
+    }
+
+    /**
+     * The copy for the plugin's own surfaces.
+     *
+     * `preference` is the user's language setting (`auto`, `zh`, `en`): a pinned
+     * language reads the built-in table and ignores DSH's active locale, so the
+     * page can run in English while the search panel is Chinese. Under `auto`
+     * the host's dictionary wins; a host without the locale service, or one
+     * that has not registered this namespace yet, falls back to the built-in
+     * English copy instead of showing raw keys.
+     */
+    function makeTranslate(ctx, preference, extra) {
+      const table = composerDictionary(preference === 'zh' ? 'zh' : 'en');
+      const own = extra === null || extra === undefined ? table : { ...table, ...extra };
+      return (key) => {
+        if (preference === 'zh' || preference === 'en') return own[key] ?? key;
+        let current = null;
+        try {
+          current = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
+        } catch (error) {
+          current = null;
+        }
+        if (current === null || current === undefined) return own[key] ?? key;
+        const text = current.bind(NS)(key);
+        if (text === key) return own[key] ?? key;
+        if (text !== SETTINGS_NS + '.' + key && text !== NS + '.' + key) return text;
+        return own[key] ?? key;
+      };
+    }
 
     const ROOT_STYLE = {
       position: 'absolute',
@@ -75,6 +271,7 @@ window.__ModuleLoader__.load({
 .dsh-pp-preview__empty{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dsh-pp-hint{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 2px 0;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
 .dsh-pp-hint__group{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.dsh-pp-hint__where{margin-left:auto;opacity:.8;white-space:nowrap}
 .dsh-pp-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10px;line-height:1;font-family:inherit}
 .dsh-pp-md{font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary)}
 .dsh-pp-md__p{margin:0 0 6px;white-space:pre-wrap;word-break:break-word}
@@ -148,6 +345,16 @@ window.__ModuleLoader__.load({
     }
 
     /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
+    /**
+     * Keep the newest `limit` prompts. The scan folds consecutive duplicates
+     * before this trims, so the setting bounds what recall and search see rather
+     * than how far back a duplicate run is folded.
+     */
+    function limitHistory(history, limit) {
+      const bound = Number.isInteger(limit) && limit > 0 ? limit : MAX_HISTORY;
+      return history.length > bound ? history.slice(history.length - bound) : history;
+    }
+
     function readHistory(sessions, sessionId) {
       if (sessions === undefined || sessions === null || sessionId === undefined || sessionId === null) return EMPTY;
       let binding;
@@ -186,7 +393,7 @@ window.__ModuleLoader__.load({
         previousText = text;
         history.push({ key: 'h-' + String(event.seq), seq: event.seq, text, lower: text.toLowerCase() });
       }
-      return history.length > MAX_HISTORY ? history.slice(history.length - MAX_HISTORY) : history;
+      return limitHistory(history, MAX_HISTORY);
     }
 
     /** Typed text of one assistant message, reasoning and tool blocks excluded. */
@@ -354,8 +561,49 @@ window.__ModuleLoader__.load({
       });
     }
 
-    /** Compact Markdown renderer for recorded replies: no HTML, links restricted to http(s), mailto, and anchors. */
-    function renderMarkdown(source, labels) {
+    /**
+     * Where the first match of `query` sits in a recorded prompt: the answer of
+     * {@link previewWindow}, used to reveal the match inside a long, cut prompt.
+     * @param {string} text
+     * @param {string} query lower-cased query, or ''
+     * @returns {{ offset: number } | null}
+     */
+    function matchAnchor(text, query) {
+      const hit = query === '' ? -1 : String(text).toLowerCase().indexOf(query);
+      if (hit < 0) return null;
+      const range = previewWindow(text, hit);
+      return { offset: Math.min(range.start, hit) };
+    }
+
+    /**
+     * The window of a long prompt the preview shows: at most `MAX_REPLY`
+     * characters, normally its last `REPLY_TAIL`, widened backwards when the
+     * first match lies earlier, and never starting with a broken line.
+     * @param {string} text
+     * @param {number} hit offset of the first match, or -1
+     * @returns {{ start: number, text: string }}
+     */
+    function previewWindow(text, hit) {
+      const source = String(text);
+      if (source.length <= MAX_REPLY) return { start: 0, text: source };
+      let start = Math.max(0, source.length - REPLY_TAIL);
+      const earliest = source.length - MAX_REPLY;
+      if (hit >= 0 && hit < start) start = Math.max(earliest, Math.min(start, hit - REPLY_TAIL));
+      if (start > 0) {
+        const line = source.indexOf('\n', start);
+        if (line >= 0 && source.length - line > REPLY_TAIL) start = line + 1;
+      }
+      return { start, text: source.slice(start) };
+    }
+
+    /**
+     * Compact Markdown renderer for recorded replies: no HTML, links restricted
+     * to http(s), mailto, and anchors. `options.labels` overrides the code-block
+     * captions; there are no options besides that, so the renderer stays a pure
+     * function of its text.
+     */
+    function renderMarkdown(source, options) {
+      const labels = options === null || options === undefined ? null : options.labels;
       const lines = String(source).replace(/\r\n?/gu, '\n').split('\n');
       const blocks = [];
       let index = 0;
@@ -484,64 +732,671 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsh-pp-md' }, children);
     }
 
+    /** Id of this plugin's Settings section and sidebar row. */
+    const SETTING_TAB_ID = 'prompt-peek';
+
+    /**
+     * Where the plugin's own page lives, named in the footer of the search panel
+     * when its preview is off. Opening Settings from script would depend on a
+     * shell API the plugin does not own.
+     */
+    function settingsLocation(ctx) {
+      const language = effectiveLanguage(ctx, 'auto') === 'zh' ? 'zh' : 'en';
+      return (language === 'zh' ? '设置 → ' : 'Settings → ') + settingsDictionary(language).settingsNav;
+    }
+
+    /** Numeric bounds the Settings page enforces before it saves, mirroring the host. */
+    const SETTING_LIMITS = {
+      previewPageSize: [40, 600],
+      historyLimit: [20, 1000],
+    };
+    /** Host fields that belong to a numeric row and its label. */
+    const SETTING_LABEL_KEYS = {
+      previewPageSize: 'previewPageSizeLabel',
+      historyLimit: 'historyLimitLabel',
+    };
+
+    /** Effective language of the plugin copy once a preference is applied to the DSH locale. */
+    function effectiveLanguage(ctx, preference) {
+      if (preference === 'zh' || preference === 'en') return preference;
+      try {
+        const current = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
+        const snapshot = current === null || current === undefined ? null : current.getSnapshot();
+        const active = snapshot === null || snapshot === undefined ? '' : String(snapshot.active);
+        return active.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+      } catch (error) {
+        return 'en';
+      }
+    }
+
+    /** The globe used by the sidebar's and the nav row's language control. */
+    function GlobeIcon(props) {
+      const size = props !== null && props !== undefined && typeof props.size === 'number' ? props.size : 16;
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        'aria-hidden': 'true',
+      },
+      h('circle', { cx: 8, cy: 8, r: 5.6, stroke: 'currentColor', strokeWidth: 1.3 }),
+      h('path', {
+        d: 'M2.6 8h10.8M8 2.4c1.7 1.5 2.6 3.4 2.6 5.6S9.7 12.1 8 13.6C6.3 12.1 5.4 10.2 5.4 8S6.3 3.9 8 2.4Z',
+        stroke: 'currentColor',
+        strokeWidth: 1.1,
+      }));
+    }
+
+    /** The light switch used by the General section's built-in rows. */
+    function Toggle(props) {
+      const { label, checked, disabled, onChange } = props;
+      return h('button', {
+        type: 'button',
+        role: 'switch',
+        'aria-checked': checked === true,
+        'aria-label': label,
+        disabled,
+        onClick: () => onChange(checked !== true),
+        style: {
+          position: 'relative',
+          flex: 'none',
+          width: 36,
+          height: 20,
+          padding: 0,
+          border: 'none',
+          borderRadius: 999,
+          cursor: disabled ? 'default' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+          background: checked === true
+            ? 'var(--dsw-alias-brand-primary)'
+            : 'var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2))',
+          transition: 'background-color 120ms ease',
+        },
+      }, h('span', {
+        style: {
+          position: 'absolute',
+          top: 2,
+          left: 2,
+          width: 16,
+          height: 16,
+          borderRadius: 999,
+          background: '#fff',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.12)',
+          transform: checked === true ? 'translateX(16px)' : 'none',
+          transition: 'transform 120ms ease',
+        },
+      }));
+    }
+
+    /**
+     * The plugin's page, a top-level Settings section of its own (like Models or
+     * Shell), built from the same row anatomy as the built-in General rows: a
+     * title/description stack on the left and one control on the right, separated
+     * by a hairline. Language gets its own group at the top and is applied as
+     * soon as it is chosen; the behavior switches and their numbers are saved
+     * together, because they are one policy.
+     */
+    function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
+      const PAGE = {
+        display: 'flex',
+        flexDirection: 'column',
+        maxWidth: 720,
+        color: 'var(--dsw-alias-label-primary)',
+        fontSize: 14,
+        lineHeight: '22px',
+      };
+      const ROW = {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 24,
+        padding: '16px 0',
+        borderBottom: '0.5px solid var(--dsw-alias-border-l1)',
+      };
+      const STACK = { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
+      const TITLE = { fontSize: 14, lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' };
+      const DESC = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)' };
+      const VALUE = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)', fontVariantNumeric: 'tabular-nums' };
+      const GROUP_TITLE = {
+        fontSize: 11,
+        lineHeight: '16px',
+        fontWeight: 600,
+        letterSpacing: '.04em',
+        textTransform: 'uppercase',
+        color: 'var(--dsw-alias-label-secondary)',
+        padding: '18px 0 2px',
+      };
+      const PILL = {
+        boxSizing: 'border-box',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        height: 32,
+        padding: '0 10px 0 12px',
+        borderRadius: 8,
+        border: '0.5px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 13,
+        cursor: 'pointer',
+      };
+      const SELECT = {
+        boxSizing: 'border-box',
+        height: 32,
+        padding: '0 8px',
+        borderRadius: 8,
+        border: '0.5px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 13,
+        width: 220,
+      };
+      const ACTIONS = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '18px 0 4px' };
+      const BUTTON = {
+        boxSizing: 'border-box',
+        height: 32,
+        padding: '0 14px',
+        borderRadius: 8,
+        border: '1px solid transparent',
+        fontFamily: 'inherit',
+        fontSize: 13,
+        lineHeight: '20px',
+        fontWeight: 500,
+        cursor: 'pointer',
+      };
+      const PRIMARY = {
+        ...BUTTON,
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: 'var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary))',
+        color: 'var(--dsw-alias-label-primary-foreground, #fff)',
+      };
+      const SECONDARY = {
+        ...BUTTON,
+        background: 'var(--dsw-alias-bg-layer-1)',
+        border: '0.5px solid var(--dsw-alias-border-l1)',
+        color: 'var(--dsw-alias-label-primary)',
+      };
+      const STATUS = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)' };
+      const ERROR = { ...STATUS, color: 'var(--dsw-alias-state-error-primary, var(--dsw-alias-label-primary))' };
+      const DEFAULTS = {
+        locale: 'auto',
+        showPreview: true,
+        smoothScroll: true,
+        previewPageSize: 180,
+        historyLimit: 300,
+        browseOrder: 'newest',
+      };
+      const labelOf = (language, languageId) => {
+        if (languageId === 'auto') return settingsDictionary(language).localeAuto;
+        return LANGUAGE_LABELS[languageId][language === 'zh' ? 'zh' : 'en'];
+      };
+
+      return function PromptPeekSettings() {
+        useSettings();
+        useLocaleRevision();
+        const state = store.get();
+        // The form's own copy follows what it is editing, so choosing a language
+        // switches the page immediately, before (and whether or not) it is saved.
+        const draft = React.useState(null);
+        const preference = draft[0] !== null && draft[0] !== undefined && (draft[0].locale === 'zh' || draft[0].locale === 'en')
+          ? draft[0].locale
+          : state.language;
+        const language = preference === 'zh' ? 'zh' : 'en';
+        const t = (key) => {
+          const dictionary = settingsDictionary(language);
+          const value = dictionary[key] ?? settingsDictionary('en')[key];
+          return typeof value === 'string' ? value : key;
+        };
+        const label = (key) => {
+          const field = SETTING_LABEL_KEYS[key];
+          if (field === undefined) return key;
+          const dictionary = settingsDictionary(language);
+          return dictionary.fields[field] ?? settingsDictionary('en').fields[field] ?? key;
+        };
+        // `values` re-reads the store whenever its revision moves (a save, the
+        // first load, or a DSH language switch); `draft` holds unsaved edits.
+        const values = React.useMemo(() => state.values, [state.revision]);
+
+        const setDraft = draft[1];
+        const [saving, setSaving] = React.useState(false);
+        const [error, setError] = React.useState('');
+        const [notice, setNotice] = React.useState('');
+        const [editable, setEditable] = React.useState(true);
+        const [path, setPath] = React.useState('');
+        const [menuOpen, setMenuOpen] = React.useState(false);
+
+        React.useEffect(() => {
+          const controller = new AbortController();
+          let cancelled = false;
+          void (async () => {
+            try {
+              const response = await fetch(SETTINGS_ROUTE, { signal: controller.signal, cache: 'no-store' });
+              const data = await response.json().catch(() => null);
+              if (cancelled) return;
+              if (!response.ok || data === null || typeof data.values !== 'object') {
+                setError(t('loadFailed'));
+                return;
+              }
+              store.set(data.values);
+              setEditable(data.editable !== false);
+              setPath(typeof data.path === 'string' ? data.path : '');
+            } catch (failure) {
+              if (cancelled || (failure !== null && failure !== undefined && failure.name === 'AbortError')) return;
+              setError(t('loadFailed'));
+            }
+          })();
+          return () => {
+            cancelled = true;
+            controller.abort();
+          };
+        }, []);
+
+        const current = draft[0] ?? values;
+        const baseline = current ?? DEFAULTS;
+        const update = (key, value) => {
+          setDraft({ ...values, ...(draft[0] ?? {}), [key]: value });
+          setError('');
+          setNotice('');
+        };
+
+        const post = async (body, onSaved) => {
+          setSaving(true);
+          setError('');
+          setNotice('');
+          try {
+            const response = await fetch(SETTINGS_ROUTE, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok || data === null || typeof data.values !== 'object') {
+              const range = data !== null && data !== undefined && data.error === 'out_of_range'
+                ? SETTING_LIMITS[data.field]
+                : undefined;
+              setError(range === undefined
+                ? t('saveFailed')
+                : t('invalidValue')
+                  .replace('{field}', label(data.field))
+                  .replace('{min}', String(range[0]))
+                  .replace('{max}', String(range[1])));
+              return;
+            }
+            store.set(data.values);
+            setDraft(null);
+            if (onSaved === undefined) setNotice(t('saved'));
+            else onSaved();
+          } catch (failure) {
+            setError(t('saveFailed'));
+          } finally {
+            setSaving(false);
+          }
+        };
+
+        /** The language applies on choice; nothing else waits for it. */
+        const chooseLanguage = (value) => {
+          update('locale', value);
+          const next = { ...baseline, locale: value };
+          void post({ values: { ...settingsPatch(next), locale: value } }, () => setNotice(''));
+        };
+
+        const settingsPatch = (source) => {
+          const patch = {};
+          for (const key of Object.keys(SETTING_LIMITS)) {
+            const range = SETTING_LIMITS[key];
+            const number = Number(source[key]);
+            patch[key] = Number.isInteger(number) && number >= range[0] && number <= range[1] ? number : DEFAULTS[key];
+          }
+          patch.showPreview = source.showPreview !== false;
+          patch.smoothScroll = source.smoothScroll !== false;
+          patch.browseOrder = source.browseOrder === 'oldest' ? 'oldest' : 'newest';
+          return patch;
+        };
+
+        const save = () => {
+          for (const key of Object.keys(SETTING_LIMITS)) {
+            const range = SETTING_LIMITS[key];
+            const number = Number(baseline[key]);
+            if (!Number.isInteger(number) || number < range[0] || number > range[1]) {
+              setError(t('invalidValue')
+                .replace('{field}', label(key))
+                .replace('{min}', String(range[0]))
+                .replace('{max}', String(range[1])));
+              return;
+            }
+          }
+          const locale = baseline.locale === 'zh' || baseline.locale === 'en' ? baseline.locale : 'auto';
+          void post({ values: { ...settingsPatch(baseline), locale } });
+        };
+
+        const reset = () => {
+          void post({ reset: true });
+        };
+
+        const disabled = saving || !editable;
+
+        const switchRow = (rowLabel, hint, checked, onToggle) => h('div', { style: ROW },
+          h('div', { style: STACK },
+            h('div', { style: TITLE }, rowLabel),
+            h('div', { style: DESC }, hint),
+          ),
+          h(Toggle, { label: rowLabel, checked, disabled, onChange: onToggle }),
+        );
+
+        const selectRow = (rowLabel, hint, value, options, onChange) => h('div', { style: ROW },
+          h('div', { style: STACK },
+            h('div', { style: TITLE }, rowLabel),
+            h('div', { style: DESC }, hint),
+          ),
+          h('select', {
+            value,
+            'aria-label': rowLabel,
+            disabled,
+            onChange: (event) => onChange(event.target.value),
+            style: SELECT,
+          }, options.map((option) => h('option', { key: option.value, value: option.value }, option.label))),
+        );
+
+        const rangeRow = (key) => {
+          const range = SETTING_LIMITS[key];
+          const value = Number(baseline[key]);
+          const shown = Number.isFinite(value) ? value : range[0];
+          return h('div', { style: ROW },
+            h('div', { style: STACK },
+              h('div', { style: TITLE }, label(key)),
+              h('div', { style: DESC }, t(key === 'previewPageSize' ? 'previewPageSizeHint' : 'historyLimitHint')),
+            ),
+            h('div', { style: { ...STACK, flex: 'none', alignItems: 'flex-end', gap: 2 } },
+              h('div', { style: VALUE }, t(key === 'previewPageSize' ? 'previewPageSizeValue' : 'historyLimitValue')
+                .replace('{value}', String(shown))),
+              h('input', {
+                type: 'range',
+                min: range[0],
+                max: range[1],
+                step: 10,
+                value: shown,
+                'aria-label': label(key),
+                disabled,
+                onChange: (event) => update(key, Number(event.target.value)),
+                style: { width: 220, margin: 0 },
+              }),
+            ),
+          );
+        };
+
+        const group = (title, rows) => h('div', { style: { display: 'flex', flexDirection: 'column' } },
+          h('div', { style: GROUP_TITLE }, title),
+          rows,
+        );
+
+        /** A menu, not a `<select>`: picking a language re-renders the page in it at once. */
+        const languageRow = () => {
+          const currentLanguage = baseline.locale === 'zh' || baseline.locale === 'en' ? baseline.locale : 'auto';
+          const options = ['auto', 'zh', 'en'];
+          return h('div', { style: ROW },
+            h('div', { style: STACK },
+              h('div', { style: TITLE }, t('localeLabel')),
+              h('div', { style: DESC }, t('localeHint')),
+            ),
+            h('div', { style: { position: 'relative', flex: 'none' } },
+              h('button', {
+                type: 'button',
+                'aria-haspopup': 'menu',
+                'aria-expanded': menuOpen,
+                'aria-label': t('localeLabel'),
+                disabled,
+                onClick: () => setMenuOpen((open) => !open),
+                style: disabled ? { ...PILL, opacity: 0.6, cursor: 'default' } : PILL,
+              },
+                h('span', { 'aria-hidden': true, style: { display: 'inline-flex' } }, h(GlobeIcon, { size: 14 })),
+                h('span', null, labelOf(language, currentLanguage)),
+                h('span', { 'aria-hidden': true, style: { opacity: 0.6 } }, '⌄'),
+              ),
+              menuOpen ? h('div', {
+                role: 'menu',
+                'aria-label': t('localeLabel'),
+                onMouseLeave: () => setMenuOpen(false),
+                style: {
+                  position: 'absolute',
+                  top: 'calc(100% + 4px)',
+                  right: 0,
+                  zIndex: 20,
+                  minWidth: 200,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  padding: 4,
+                  borderRadius: 10,
+                  border: '0.5px solid var(--dsw-alias-border-l1)',
+                  background: 'var(--dsw-alias-bg-overlay)',
+                  boxShadow: 'var(--dsw-elevation-prominent)',
+                },
+              }, options.map((id) => h('button', {
+                key: id,
+                type: 'button',
+                role: 'menuitemradio',
+                'aria-checked': currentLanguage === id,
+                onClick: () => {
+                  setMenuOpen(false);
+                  if (id !== currentLanguage || current === null) chooseLanguage(id);
+                },
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '7px 10px',
+                  border: 'none',
+                  borderRadius: 7,
+                  background: currentLanguage === id ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
+                  color: 'var(--dsw-alias-label-primary)',
+                  font: 'inherit',
+                  fontSize: 13,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                },
+              },
+                h('span', null, labelOf(language, id)),
+                currentLanguage === id ? h('span', { 'aria-hidden': true }, '✓') : null,
+              ))) : null,
+            ),
+          );
+        };
+
+        if (current === null && error !== '') {
+          return h('div', { style: { padding: '18px 0', ...PAGE } },
+            h('div', { style: { ...TITLE, fontSize: 16, fontWeight: 600 } }, t('settingsTitle')),
+            h('div', { style: ERROR, role: 'alert' }, error),
+          );
+        }
+
+        return h('div', { style: PAGE },
+          h('div', { style: { padding: '6px 0 12px' } },
+            h('div', { style: { fontSize: 16, lineHeight: '24px', fontWeight: 600 } }, t('settingsTitle')),
+            h('div', { style: DESC }, t('settingsIntro')),
+          ),
+          group(t('sectionLanguage'), [languageRow()]),
+          group(t('sectionBehavior'), [
+            switchRow(t('showPreviewLabel'), t('showPreviewHint'), baseline.showPreview !== false, (value) => update('showPreview', value)),
+            switchRow(t('smoothScrollLabel'), t('smoothScrollHint'), baseline.smoothScroll !== false, (value) => update('smoothScroll', value)),
+            rangeRow('previewPageSize'),
+            rangeRow('historyLimit'),
+            selectRow(
+              t('browseOrderLabel'),
+              t('browseOrderHint'),
+              baseline.browseOrder === 'oldest' ? 'oldest' : 'newest',
+              [
+                { value: 'oldest', label: t('browseOrderOldest') },
+                { value: 'newest', label: t('browseOrderNewest') },
+              ],
+              (value) => update('browseOrder', value),
+            ),
+          ]),
+          !editable ? h('div', { style: { ...STATUS, paddingTop: 12 } }, t('readOnly')) : null,
+          h('div', { style: ACTIONS },
+            h('button', {
+              type: 'button',
+              disabled,
+              onClick: save,
+              style: disabled ? { ...PRIMARY, opacity: 0.6, cursor: 'default' } : PRIMARY,
+            }, saving ? t('saving') : t('save')),
+            h('button', {
+              type: 'button',
+              disabled,
+              onClick: reset,
+              style: disabled ? { ...SECONDARY, opacity: 0.6, cursor: 'default' } : SECONDARY,
+            }, t('reset')),
+            notice !== '' ? h('span', { style: STATUS, role: 'status' }, notice) : null,
+            error !== '' ? h('span', { style: ERROR, role: 'alert' }, error) : null,
+          ),
+          path === '' ? null : h('div', { style: { ...DESC, paddingBottom: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, path),
+        );
+      };
+    }
+
     return {
       inject: ['slots'],
       apply(ctx) {
         const locale = ctx.get('locale');
-        const translate = (key) => {
-          const current = ctx.get('locale');
-          if (current === undefined || current === null) return key;
-          return current.bind(NS)(key);
-        };
         const refreshableSessions = () => ctx.get('sessions');
+        /**
+         * The plugin's settings document, mirrored for every surface that reads
+         * it: the search panel, animated pill, and Settings page all render from
+         * this one store, so a save applies everywhere at once.
+         *
+         * Values come from the Host document and profile baseline when the shell
+         * exposes them, then from edits saved on the Settings page during this
+         * session (`savedOverrides`), then from the documented defaults. The
+         * revision bumps on each save and each DSH locale move.
+         */
+        const savedOverrides = {};
+        const readSetting = (key) => savedOverrides[key];
+        /** Paging step for the reply preview; the wheel moves a quarter page per notch. */
+        const pagePager = (values) => {
+          const configured = values !== null && values !== undefined && Number.isInteger(values.previewPageSize)
+            ? values.previewPageSize
+            : PREVIEW_PAGE;
+          return {
+            page: configured,
+            notch: Math.max(24, Math.round(configured / 4)),
+            smooth: values === null || values === undefined || values.smoothScroll !== false,
+          };
+        };
+        /** The copy for the composer surfaces, readable from key handlers as well as render. */
+        const copy = () => makeTranslate(ctx, settingsStore.get().preference);
+        const settingsCopy = () => settingsDictionary(settingsStore.get().language === 'zh' ? 'zh' : 'en');
+
+        /**
+         * The plugin's settings document, mirrored for every surface that reads
+         * it: the search panel, animated pill, and Settings page all render from
+         * this one snapshot, so a save applies everywhere at once.
+         */
+        const settingsStore = (() => {
+          // Read through to the Host document on every access, so the page and
+          // the composer never disagree about a value. The revision is the only
+          // stored state: it bumps on a save and on a DSH locale move.
+          const state = {
+            get values() {
+              const value = (key) => {
+                const saved = readSetting(key);
+                if (saved !== undefined) return saved;
+                // Optional context values: a Host that mirrors its settings into
+                // the client may expose the saved document and the profile
+                // baseline. Absent (as on the stock Host) the defaults below win.
+                const baseline = ctx.get('settingFallback');
+                if (baseline !== null && baseline !== undefined && baseline[key] !== undefined) return baseline[key];
+                const host = ctx.get('storedSettings');
+                if (host !== null && host !== undefined && host[key] !== undefined) return host[key];
+                return undefined;
+              };
+              return {
+                locale: value('locale') ?? 'auto',
+                showPreview: value('showPreview') !== false,
+                smoothScroll: value('smoothScroll') !== false,
+                previewPageSize: value('previewPageSize') ?? PREVIEW_PAGE,
+                historyLimit: value('historyLimit') ?? MAX_HISTORY,
+                browseOrder: value('browseOrder') ?? 'newest',
+              };
+            },
+            get preference() {
+              const candidate = state.values.locale;
+              return LANGUAGE_LABELS[candidate] === undefined ? 'auto' : candidate;
+            },
+            get language() {
+              return effectiveLanguage(ctx, state.preference);
+            },
+            revision: 0,
+          };
+          const listeners = new Set();
+          const notify = () => {
+            state.revision += 1;
+            for (const listener of [...listeners]) {
+              try {
+                listener();
+              } catch (error) {
+                console.error('prompt-peek: a settings subscriber crashed', error);
+              }
+            }
+          };
+          return {
+            get: () => state,
+            /** Apply a saved (or loaded) document and refresh every surface. */
+            set(next) {
+              Object.assign(savedOverrides, next);
+              notify();
+            },
+            /** Re-read the effective language after DSH's own locale moved. */
+            sync: notify,
+            subscribe(listener) {
+              listeners.add(listener);
+              return () => {
+                listeners.delete(listener);
+              };
+            },
+          };
+        })();
+        if (locale !== undefined && locale !== null) {
+          ctx.effect(() => locale.subscribe(() => settingsStore.sync()), 'prompt-peek: follow the DSH locale');
+        }
+        /** One setting, exactly as the store sees it (saved override, then Host document). */
+        const readNow = (key) => settingsStore.get().values[key];
+        const useSettings = () => React.useSyncExternalStore(
+          React.useCallback((notify) => settingsStore.subscribe(notify), []),
+          () => settingsStore.get().revision,
+          () => 0,
+        );
+        /** Re-render on DSH locale changes, which the `auto` language follows. */
+        const useLocaleRevision = () => React.useSyncExternalStore(
+          React.useCallback((notify) => {
+            let current = null;
+            try {
+              current = ctx.get('locale');
+            } catch (error) {
+              current = null;
+            }
+            return current === undefined || current === null ? () => {} : current.subscribe(notify);
+          }, []),
+          () => {
+            let current = null;
+            try {
+              current = ctx.get('locale');
+            } catch (error) {
+              current = null;
+            }
+            return current === undefined || current === null ? 0 : current.getSnapshot().revision;
+          },
+          () => 0,
+        );
 
         if (locale !== undefined && locale !== null) {
-          ctx.effect(() => locale.register(NS, 'zh', {
-            title: '搜索已发送的消息',
-            placeholder: '输入关键词…',
-            empty: '没有匹配的消息',
-            emptyShort: '无结果',
-            hintSelect: '选择',
-            hintPreview: '预览',
-            hintHidePreview: '收起',
-            hintTypeSpace: '输入空格',
-            hintPage: '翻页',
-            hintInsert: '填入',
-            hintClose: '取消',
-            keySpace: '空格',
-            previewTitle: 'dsh 的回答',
-            previewMissing: '这一条在已加载的记录里没有文字回复。',
-            copyCode: '复制',
-            copiedCode: '已复制',
-            codeLabel: '代码',
-            wrapCode: '自动换行',
-            unwrapCode: '取消换行',
-            browse: '历史',
-            browseHint: '↑↓ 翻看 · Esc 退出',
-          }), 'prompt-peek: zh dictionary');
-          ctx.effect(() => locale.register(NS, 'en', {
-            title: 'Search sent messages',
-            placeholder: 'Type to filter…',
-            empty: 'No matching messages',
-            emptyShort: 'No results',
-            hintSelect: 'select',
-            hintPreview: 'preview',
-            hintHidePreview: 'hide',
-            hintTypeSpace: 'type space',
-            hintPage: 'page',
-            hintInsert: 'insert',
-            hintClose: 'cancel',
-            keySpace: 'Space',
-            previewTitle: "dsh's reply",
-            previewMissing: 'No text reply is available in the loaded history.',
-            copyCode: 'Copy',
-            copiedCode: 'Copied',
-            codeLabel: 'Code',
-            wrapCode: 'Wrap lines',
-            unwrapCode: 'Unwrap lines',
-            browse: 'History',
-            browseHint: '↑↓ browse · Esc exit',
-          }), 'prompt-peek: en dictionary');
+          // The dictionaries feed the `auto` language; a pinned language reads the
+          // built-in copy instead, so both paths agree key for key.
+          ctx.effect(() => locale.register(NS, 'zh', composerDictionary('zh')), 'prompt-peek: zh dictionary');
+          ctx.effect(() => locale.register(NS, 'en', BASE_DICTIONARY), 'prompt-peek: en dictionary');
+          ctx.effect(() => locale.register(SETTINGS_NS, 'zh', settingsDictionary('zh')), 'prompt-peek: settings zh dictionary');
+          ctx.effect(() => locale.register(SETTINGS_NS, 'en', settingsDictionary('en')), 'prompt-peek: settings en dictionary');
         }
 
         function ComposerHistory(props) {
@@ -552,22 +1407,17 @@ window.__ModuleLoader__.load({
           const draft = useInput((state) => (state === undefined || state === null ? "" : state.draft));
           const phase = useInput((state) => (state === undefined || state === null ? "plain" : state.phase));
 
-          const localeRevision = React.useSyncExternalStore(
-            React.useCallback((notify) => {
-              const current = ctx.get('locale');
-              return current === undefined || current === null ? () => {} : current.subscribe(notify);
-            }, []),
-            () => {
-              const current = ctx.get('locale');
-              return current === undefined || current === null ? 0 : current.getSnapshot().revision;
-            },
-            () => 0,
-          );
+          // Settings changes (language, preview, paging) and DSH locale changes
+          // both re-render this overlay; the translate below reads the current
+          // language preference, not a snapshot captured at mount.
+          useSettings();
+          useLocaleRevision();
+          const translate = (key) => copy()(key);
 
           const rootRef = React.useRef(null);
           const panelRef = React.useRef(null);
           const previewRef = React.useRef(null);
-          const scrollAnimRef = React.useRef({ frame: 0, target: 0 });
+          const scrollAnimRef = React.useRef({ frame: 0, target: 0, held: false, direction: 0 });
           const inputRef = React.useRef(null);
           const listRef = React.useRef(null);
           const editorRef = React.useRef(null);
@@ -583,12 +1433,22 @@ window.__ModuleLoader__.load({
           draftRef.current = typeof draft === 'string' ? draft : '';
           phaseRef.current = phase;
 
+          const allowPreview = readNow('showPreview') !== false;
+
           const [browse, setBrowse] = React.useState(null);
           const [items, setItems] = React.useState(EMPTY);
           const [panel, setPanel] = React.useState(null);
           const [previewOpen, setPreviewOpen] = React.useState(false);
           const [previewText, setPreviewText] = React.useState(null);
+          const [previewAnchor, setPreviewAnchor] = React.useState(null);
           const panelOpen = panel !== null;
+          // The overlay may mount before the Host and settings have answered.
+          // Until both have, it renders an empty, inactive tree without
+          // attaching its composer listener, so nothing can race a half-built
+          // component. Reading one query but writing through the other would
+          // lose the first message of a brand-new session.
+          const dataReady = typeof props.sessionId === 'string' && props.sessionId !== ''
+            && refreshableSessions() !== undefined;
 
           const writeDraft = (text) => {
             try {
@@ -638,6 +1498,16 @@ window.__ModuleLoader__.load({
             setBrowse({ index: next, total: mode.items.length });
           };
 
+          const focusQuery = () => {
+            const field = inputRef.current;
+            if (field === null || field === undefined) return;
+            try {
+              field.focus();
+            } catch (error) {
+              console.error('prompt-peek: the search field could not take focus', error);
+            }
+          };
+
           const closeSearch = (refocus) => {
             setPanel(null);
             setItems(EMPTY);
@@ -655,21 +1525,23 @@ window.__ModuleLoader__.load({
             setBrowse(null);
             setPreviewOpen(false);
             setPreviewText(null);
-            setItems(readHistory(refreshableSessions(), sessionRef.current));
+            setItems(limitHistory(readHistory(refreshableSessions(), sessionRef.current), readNow('historyLimit')));
             setPanel({ query: '', selected: 0 });
           };
 
           const queryText = panel === null ? '' : panel.query;
+          const order = readNow('browseOrder') === 'oldest' ? 'oldest' : 'newest';
           const matches = React.useMemo(() => {
             if (panel === null) return EMPTY;
             const query = queryText.trim().toLowerCase();
             const found = [];
-            for (let index = items.length - 1; index >= 0 && found.length < MAX_RESULTS; index -= 1) {
-              const item = items[index];
+            const source = order === 'oldest' ? items : items.slice().reverse();
+            for (let index = 0; index < source.length && found.length < MAX_RESULTS; index += 1) {
+              const item = source[index];
               if (query === '' || item.lower.indexOf(query) >= 0) found.push(item);
             }
             return found;
-          }, [panel, queryText, items]);
+          }, [panel, queryText, items, order]);
           matchesRef.current = matches;
           const selected = matches.length === 0 ? 0 : Math.min(panel.selected, matches.length - 1);
           const codeLabels = React.useMemo(() => ({
@@ -678,12 +1550,20 @@ window.__ModuleLoader__.load({
             code: translate('codeLabel'),
             wrap: translate('wrapCode'),
             unwrap: translate('unwrapCode'),
-          }), [localeRevision]);
+          }), [copy]);
+          // A long prompt shows its tail; the first search match widens that
+          // window so the selected row shows why it matched.
+          const shown = previewAnchor === null ? null : previewWindow(previewText, previewAnchor.offset);
           const previewNodes = React.useMemo(
-            () => (previewText === null || previewText === undefined ? null : renderMarkdown(previewText, codeLabels)),
-            [previewText, codeLabels],
+            () => (shown === null ? null : renderMarkdown(shown.text, codeLabels)),
+            [previewText, codeLabels, previewAnchor],
           );
-          const previewVisible = previewOpen && matches.length > 0;
+          const previewShown = previewOpen && matches.length > 0;
+          const previewVisible = previewShown && allowPreview;
+          const pager = pagePager({
+            previewPageSize: readNow('previewPageSize'),
+            smoothScroll: readNow('smoothScroll'),
+          });
 
           handlerRef.current = (event) => {
             const editor = editorRef.current;
@@ -719,7 +1599,7 @@ window.__ModuleLoader__.load({
               return;
             }
             if (!modifier && !event.shiftKey && key === 'ArrowUp' && phaseRef.current === 'plain' && draftRef.current.trim() === '') {
-              const history = readHistory(refreshableSessions(), sessionRef.current);
+              const history = limitHistory(readHistory(refreshableSessions(), sessionRef.current), readNow('historyLimit'));
               if (history.length > 0) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -745,6 +1625,7 @@ window.__ModuleLoader__.load({
             setItems(EMPTY);
             setPreviewOpen(false);
             setPreviewText(null);
+            if (!dataReady) return undefined;
             let disposed = false;
             let frame = 0;
             let teardown = null;
@@ -779,7 +1660,7 @@ window.__ModuleLoader__.load({
               if (frame !== 0) cancelAnimationFrame(frame);
               if (teardown !== null) teardown();
             };
-          }, [props.sessionId]);
+          }, [props.sessionId, dataReady]);
 
           React.useEffect(() => {
             if (!panelOpen) return;
@@ -814,6 +1695,18 @@ window.__ModuleLoader__.load({
             }
           }, [selected, panelOpen, previewVisible]);
 
+          /** Scroll the row that carries a long prompt's first match into view of the preview. */
+          React.useEffect(() => {
+            const scroller = previewRef.current;
+            if (!previewVisible || scroller === null || scroller === undefined) return;
+            const hit = scroller.querySelector('.dsh-pp-md__focus');
+            if (hit === null || hit === undefined) return;
+            const head = hit.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            const offset = head + scroller.scrollTop - 12;
+            if (offset <= 0 || Math.abs(offset - scroller.scrollTop) < 1) return;
+            scrollPreviewBy(offset - scroller.scrollTop, false, false);
+          }, [previewNodes, previewVisible]);
+
           React.useEffect(() => {
             if (!previewOpen) return;
             const item = matches[selected];
@@ -823,6 +1716,8 @@ window.__ModuleLoader__.load({
             }
             const reply = readReply(refreshableSessions(), sessionRef.current, item.seq);
             const next = reply === null || reply.text === '' ? null : reply.text;
+            const anchor = next === null ? null : matchAnchor(next, queryText.trim().toLowerCase());
+            setPreviewAnchor(anchor);
             setPreviewText((previous) => (previous === next ? previous : next));
           }, [previewOpen, matches, selected]);
 
@@ -833,14 +1728,17 @@ window.__ModuleLoader__.load({
               cancelAnimationFrame(animation.frame);
               animation.frame = 0;
             }
+            animation.held = false;
+            animation.direction = 0;
           };
 
           /**
            * Glide the preview by `delta` pixels instead of jumping. Discrete presses queue onto
            * the running target, while a held key only keeps one page of lead so it cannot race
-           * ahead; a wheel or a drag cancels the glide so the reader never fights it.
+           * ahead; a wheel or a drag cancels the glide so the reader never fights it. `snap`
+           * false places the preview directly, for revealing a match on open.
            */
-          const scrollPreviewBy = (delta, repeat) => {
+          const scrollPreviewBy = (delta, repeat, snap) => {
             const scroller = previewRef.current;
             if (scroller === null || scroller === undefined) return;
             const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
@@ -853,6 +1751,10 @@ window.__ModuleLoader__.load({
             const from = running && !repeat ? animation.target : scroller.scrollTop;
             const target = Math.max(0, Math.min(limit, from + delta));
             animation.target = target;
+            if (snap === false) {
+              scroller.scrollTop = target;
+              return;
+            }
             if (Math.abs(target - scroller.scrollTop) < 1) {
               scroller.scrollTop = target;
               return;
@@ -860,7 +1762,7 @@ window.__ModuleLoader__.load({
             const reduced = typeof window !== 'undefined'
               && typeof window.matchMedia === 'function'
               && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            if (reduced) {
+            if (reduced || !pager.smooth) {
               stopPreviewScroll();
               scroller.scrollTop = target;
               return;
@@ -893,7 +1795,8 @@ window.__ModuleLoader__.load({
 
           const onQueryKeyUp = (event) => {
             const key = typeof event.key === 'string' ? event.key : '';
-            if (key !== 'PageDown' && key !== 'PageUp') return;
+            const animated = key === 'PageDown' || key === 'PageUp' || key === 'ArrowDown' || key === 'ArrowUp';
+            if (!animated) return;
             const animation = scrollAnimRef.current;
             if (animation.held !== true) return;
             animation.held = false;
@@ -916,6 +1819,31 @@ window.__ModuleLoader__.load({
             };
           }, [previewVisible]);
 
+          /**
+           * The wheel moves the preview one page per notch while the cursor is
+           * over the search box. A wheel gesture has no key-up, so it keeps
+           * animating until the accumulated delta turns around or settles.
+           */
+          const onQueryWheel = (event) => {
+            if (!previewVisible) return;
+            const scroller = previewRef.current;
+            if (scroller === null || scroller === undefined) return;
+            const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            if (limit <= 0) return;
+            const units = event.deltaMode === 1 ? 1 : (event.deltaMode === 2 ? pager.page / pager.notch : 1);
+            const delta = event.deltaY * units;
+            if (delta === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const animation = scrollAnimRef.current;
+            const running = animation.frame !== 0;
+            if (running && Math.sign(delta) !== animation.direction) stopPreviewScroll();
+            else if (running && (animation.target <= 0 || animation.target >= limit)) return;
+            animation.held = 'wheel';
+            animation.direction = Math.sign(delta);
+            scrollPreviewBy(delta > 0 ? pager.page : -pager.page, true);
+          };
+
           const onQueryKeyDown = (event) => {
             const native = event.nativeEvent;
             if (native !== undefined && native !== null && (native.isComposing === true || native.keyCode === 229)) return;
@@ -937,7 +1865,7 @@ window.__ModuleLoader__.load({
             if (previewVisible && (key === 'PageDown' || key === 'PageUp')) {
               event.preventDefault();
               event.stopPropagation();
-              scrollPreviewBy(key === 'PageDown' ? PREVIEW_PAGE : -PREVIEW_PAGE, event.repeat === true);
+              scrollPreviewBy(key === 'PageDown' ? pager.page : -pager.page, event.repeat === true);
               return;
             }
             if (key === 'ArrowDown' || key === 'ArrowUp') {
@@ -985,6 +1913,7 @@ window.__ModuleLoader__.load({
             onClick: () => accept(item),
           }, highlight(item.text, queryText.trim().toLowerCase()));
 
+          if (!dataReady) return h('div', { ref: rootRef, style: { display: 'none' }, 'data-dsh-prompt-peek': '' });
           return h('div', { ref: rootRef, style: ROOT_STYLE, 'data-dsh-prompt-peek': '' },
             h('style', { key: 'style' }, CSS),
             browse === null ? null : h('div', { key: 'pill', className: 'dsh-pp-pill' },
@@ -993,7 +1922,21 @@ window.__ModuleLoader__.load({
               h('span', { className: 'dsh-pp-pill__count' }, (browse.index + 1) + '/' + browse.total),
               h('span', { className: 'dsh-pp-pill__hint' }, translate('browseHint')),
             ),
-            panelOpen ? h('div', { key: 'panel', ref: panelRef, className: 'dsh-pp-panel', role: 'dialog', 'aria-label': translate('title') },
+            panelOpen ? h('div', {
+              key: 'panel',
+              ref: panelRef,
+              className: 'dsh-pp-panel',
+              role: 'dialog',
+              'aria-label': translate('title'),
+              onMouseDown: (event) => {
+                // The footer button and the preview are not focus stops; keep the
+                // query field focused so ↑ / ↓ / Space keep working after a click.
+                if (event.target !== null && event.target !== undefined && event.target.closest !== undefined
+                  && event.target.closest('a, button, input') !== null) return;
+                event.preventDefault();
+                focusQuery();
+              },
+            },
               h('div', { className: 'dsh-pp-head' },
                 h('span', { className: 'dsh-pp-title' }, translate('title')),
                 h('span', { className: 'dsh-pp-count' }, matches.length === 0 ? translate('emptyShort') : ((selected + 1) + ' / ' + matches.length)),
@@ -1016,9 +1959,17 @@ window.__ModuleLoader__.load({
                   onChange: (event) => setPanel({ query: event.target.value, selected: 0 }),
                   onKeyDown: onQueryKeyDown,
                   onKeyUp: onQueryKeyUp,
+                  onWheel: onQueryWheel,
                 }),
               ),
-              h('div', { ref: listRef, id: 'dsh-pp-listbox', className: 'dsh-pp-list', role: 'listbox' },
+              h('div', {
+                ref: listRef,
+                id: 'dsh-pp-listbox',
+                className: 'dsh-pp-list',
+                role: 'listbox',
+                tabIndex: -1,
+                onWheel: onQueryWheel,
+              },
                 matches.length === 0
                   ? h('div', { className: 'dsh-pp-empty' }, translate('empty'))
                   : matches.map(row),
@@ -1031,11 +1982,16 @@ window.__ModuleLoader__.load({
               ) : null,
               h('div', { className: 'dsh-pp-hint' },
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('↑'), keycap('↓'), translate('hintSelect')),
-                h('span', { className: 'dsh-pp-hint__group' }, keycap(translate('keySpace')), translate(previewVisible ? 'hintHidePreview' : 'hintPreview')),
-                h('span', { className: 'dsh-pp-hint__group' }, keycap('Shift'), keycap(translate('keySpace')), translate('hintTypeSpace')),
+                allowPreview
+                  ? h('span', { className: 'dsh-pp-hint__group' }, keycap(translate('keySpace')), translate(previewShown ? 'hintHidePreview' : 'hintPreview'))
+                  : null,
+                allowPreview ? h('span', { className: 'dsh-pp-hint__group' }, keycap('Shift'), keycap(translate('keySpace')), translate('hintTypeSpace')) : null,
                 previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, keycap('PgUp'), keycap('PgDn'), translate('hintPage')) : null,
+                previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, translate('hintWheel')) : null,
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Enter'), translate('hintInsert')),
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Esc'), translate('hintClose')),
+                allowPreview ? null : h('span', { className: 'dsh-pp-hint__group dsh-pp-hint__where', title: translate('previewOff') },
+                  translate('previewOff'), ' · ', settingsLocation(ctx)),
               ),
             ) : null,
           );
@@ -1046,6 +2002,29 @@ window.__ModuleLoader__.load({
           id: 'prompt-peek',
           order: 4,
         }, ComposerHistory));
+
+        // Settings gets a top-level section of its own (shown between Shell and
+        // Built-in plugins), with its own sidebar row and icon, instead of a tab
+        // buried inside the built-in plugins section. The section is built once
+        // and mounted on first selection by the settings shell.
+        const PromptPeekSettings = createSettingsPage(ctx, settingsStore, useSettings, useLocaleRevision);
+        const settingsLabel = (key) => () => settingsCopy()[key];
+        ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: SETTING_TAB_ID,
+          order: 40,
+          label: settingsLabel('settingsNav'),
+          locale: SETTINGS_NS,
+        }, PromptPeekSettings));
+        ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+          name: 'settings.section.icon',
+          id: SETTING_TAB_ID,
+          order: 40,
+          label: settingsLabel('settingsNav'),
+        }, (props) => {
+          const size = props !== null && props !== undefined && typeof props.size === 'number' ? props.size : 16;
+          return React.createElement(GlobeIcon, { size });
+        }));
       },
     };
   },

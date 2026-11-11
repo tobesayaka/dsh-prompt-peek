@@ -35,11 +35,29 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 | `↑` / `↓` | Select a match. |
 | `Space` | Toggle the Markdown preview of the reply to the selected prompt. |
 | `Shift+Space` | Type a literal space in the search query. |
-| `PgUp` / `PgDn` | Glide the reply preview by about ten lines; hold to keep scrolling, release to stop. |
+| `PgUp` / `PgDn` | Glide the reply preview by one page; hold to keep scrolling, release to stop. |
+| Mouse wheel | While the preview is open, the wheel over the search box scrolls the reply one notch at a time. |
 | `Enter` | Put the selected prompt into the composer. |
 | `Esc` | Close search. |
 
 `Space` is reserved for the preview while the search box is focused, so a query that needs spaces uses `Shift+Space`. The footer hint shows both. While browsing, a small pill above the composer shows your position (`History 3/12`).
+
+## Settings
+
+The plugin has its own section in **Settings** — a sidebar row named **Prompt peek**, between *Shell* and *Built-in plugins* — so its preferences are a page of their own rather than a tab buried inside another section. Language is the first group and applies the moment you pick it; the behavior rows save together, because they are one policy.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. |
+| Show reply preview | on | When off, `Space` no longer opens the reply preview; the footer says where to turn it back on. |
+| Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
+| Lines per page | 180 | How far one `PgUp` / `PgDn` and one wheel notch move the preview. |
+| History limit | 300 | How many of the session's most recent prompts recall and search read. |
+| Result order | Newest first | `Oldest first` lists matches like a rendered listbox (ARIA pops the listbox upward, so keeping the selected prompt next to the composer is `Newest first`, the shell order). |
+
+**Save** writes the whole form; **Reset to profile defaults** deletes the settings file. A save applies immediately in open composers, without a reload.
+
+Settings live in `~/.dsh/prompt-peek/settings.json` (file mode `0600`), not in the DSH user-settings document, so a local checkout shared by several profiles keeps one set of preferences. Only these six fields are stored — never prompts, replies, or session text. `cordis.patch.yml`'s `config` is the baseline; the file holds overrides.
 
 ## Install
 
@@ -62,7 +80,11 @@ The same operation is `plugin_manager` with `install_bundle` and this directory 
 
 The plugin registers one entry in the `conversation.input.overlay` slot of the composer. That entry attaches a capture-phase key listener to the composer card, so it sees the key before Lexical does, and it writes drafts through the composer's own `inputActions.setDraft()` API rather than touching the editor DOM.
 
-History comes from `sessions.binding(sessionId).eventSource`: `user/message` events with `source.kind === 'user'`, in order. The reply preview walks forward from that message to the next human message and collects `assistant/message` text blocks.
+History comes from `sessions.binding(sessionId).eventSource`: `user/message` events with `source.kind === 'user'`, in order. The reply preview walks forward from that message to the next human message and collects `assistant/message` text blocks. A long prompt keeps its last 400 characters and widens back to 6000 characters when the first search match lies earlier, marking that paragraph so the preview scrolls to it — the selected list row then shows *why* it matched.
+
+The Host half owns the settings route `GET` / `POST /api/prompt-peek.settings` (read, save a patch, or `{ "reset": true }`), registered on Connection's shared `/api` handler so it inherits the same cookie, Host/Origin, and Peer checks as every other plugin route. Connection is declared inside an optional child fiber, so a profile without it still loads the plugin. The client reads the route when the section opens; the section itself registers into the `settings.section` and `settings.section.icon` slots with its own nav label and globe icon.
+
+While the page is closed the plugin works from its documented defaults; values saved during the session apply to every open composer at once. A DSH language switch is followed only under **Follow the DSH interface** — a pinned language keeps the plugin's own copy.
 
 No build step and no dependencies: the whole client half is plain JavaScript in `src/client.js`, including the Markdown renderer and the preview scroll animation. It reaches the host only through the web shell's frozen platform module table — `react` for the UI and `@deepseek-ai/dsh-client-ui-primitives` for the shared `CodeBlock`; when a host does not expose that component, the preview falls back to a plain `<pre>` with a language label.
 
@@ -73,6 +95,8 @@ dsh-prompt-peek/
 ├── src/
 │   ├── index.js
 │   └── client.js
+├── test/
+│   └── settings.test.mjs
 ├── locale/
 │   ├── en.json
 │   └── zh.json
@@ -87,7 +111,7 @@ dsh-prompt-peek/
 └── cordis.patch.yml
 ```
 
-`src/index.js` is the host half (it has no behavior today); `src/client.js` is the client entry with the keyboard handling, Markdown renderer, and styles. `locale/` serves both the plugin-list metadata and the document selected for the plugin detail page.
+`src/index.js` is the host half (settings route and file); `src/client.js` is the client entry with the keyboard handling, Markdown renderer, Settings page, and styles. `locale/` serves the plugin-list metadata, the document selected for the plugin detail page, and the tab label.
 
 ## Development
 
@@ -95,7 +119,9 @@ dsh-prompt-peek/
 2. Edit `src/client.js`.
 3. Reload the client module: disable and re-enable the bundle in the Plugins page (HMR recommends it), or reload the page / restart DSH when the host cannot recompose.
 
-There is no test runner yet. `npm run check` runs `node --check` over the JavaScript entry points, and the locale JSON files can be parsed with `node -e`; the Markdown renderer is a pure function that can be exercised with a `React.createElement` stub.
+- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one.
+- `npm run check` runs `node --check` over both entry points.
+- The client half has no runner: render it with a `React.createElement` stub, or verify in the browser as described above. Client changes need a page reload or a disable/enable of the bundle; Host changes need a DSH restart.
 
 ## Known limitations
 
@@ -103,6 +129,8 @@ There is no test runner yet. `npm run check` runs `node --check` over the JavaSc
 - History is **per session**; a brand-new session starts empty.
 - The Markdown subset is intentionally flat: no nested lists, no raw HTML, no images.
 - `Ctrl+R`/`Cmd+R` are only intercepted while the composer has keyboard focus; the browser reloads normally everywhere else.
+- The plugin's language covers the plugin's own surfaces (search panel, history pill, Settings page). DSH's slot chrome around the Settings tab is labelled by the host, which follows the DSH language.
+- The Settings page reads the saved file when it opens. A change made by editing the file directly is picked up after the page is reopened or the plugin is restarted.
 
 ## Changelog
 
