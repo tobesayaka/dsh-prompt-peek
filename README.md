@@ -35,7 +35,7 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 | `↑` / `↓` | Select a match. |
 | `Space` | Toggle the Markdown preview of the reply to the selected prompt. |
 | `Shift+Space` | Type a literal space in the search query. |
-| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 270 px, about fifteen lines); hold to keep scrolling, release to stop. |
+| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 270 px, about fifteen lines); hold to keep scrolling, release to stop. If the preview is not open yet, the first press opens it; at the top or bottom edge it moves the selection to the previous or next prompt instead of doing nothing. |
 | Mouse wheel | While the preview is open, the wheel over the search box scrolls the reply a quarter page per notch. |
 | `Enter` | Put the selected prompt into the composer. |
 | `Esc` | Close search. |
@@ -48,10 +48,10 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. |
+| Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. **Follow the DSH interface** takes the language from DSH's active locale live, including `zh-CN`-style tags, so the panel and this page switch whenever DSH's language does. |
 | Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
-| Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. |
+| Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. Once the preview reaches either edge, `PgUp` / `PgDn` move the selection to the previous / next prompt instead of appearing to do nothing. |
 | History limit | 300 | How many of the session's most recent prompts recall and search read. |
 | Result order | Newest first | `Oldest first` lists matches like a rendered listbox (ARIA pops the listbox upward, so keeping the selected prompt next to the composer is `Newest first`, the shell order). |
 

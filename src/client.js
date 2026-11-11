@@ -177,9 +177,8 @@ window.__ModuleLoader__.load({
 
     /**
      * The copy of the composer surfaces for one language: the neutral English
-     * baseline plus the zh overrides. `auto` registers the zh table with the
-     * host so host-side copy (slot labels) follows DSH; a pinned language reads
-     * this table directly.
+     * baseline plus the zh overrides. Both tables are also registered with the
+     * DSH locale service, so `auto` and a pinned language read the same keys.
      */
     function composerDictionary(language) {
       if (language !== 'zh') return BASE_DICTIONARY;
@@ -213,31 +212,88 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Read the DSH locale service, or `null` when the caller has none (a plain
+     * browser test, an older shell). Looked up on every call: this plugin's
+     * client entry loads before the locale plugin finishes its async apply.
+     * @param {any} ctx
+     * @returns {any}
+     */
+    function localeFace(ctx) {
+      try {
+        const face = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
+        return face === undefined || face === null ? null : face;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    /** `zh` / `en` for a pinned preference, or for DSH's active locale under `auto`. */
+    function effectiveLanguage(ctx, preference) {
+      if (preference === 'zh' || preference === 'en') return preference;
+      try {
+        const face = localeFace(ctx);
+        const snapshot = face === null || typeof face.getSnapshot !== 'function' ? null : face.getSnapshot();
+        const active = snapshot === null || snapshot === undefined ? '' : String(snapshot.active);
+        return active.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+      } catch (error) {
+        return 'en';
+      }
+    }
+
+    /**
+     * One key's text, resolved without touching the DOM or the ctx.
+     *
+     * `lookup` is what the host's locale dictionary answers for a key (`NS` or
+     * `NS.settings`); an empty string means "not translated here". A pinned
+     * language reads the built-in table only; `auto` prefers a host translation
+     * and falls back to `fallback` — the table for the language DSH is running
+     * in, which the caller resolves from the live locale. Both paths share the
+     * same key set, so a missing host registration never turns the panel
+     * English on a Chinese interface.
+     * @param {'auto' | 'zh' | 'en'} preference
+     * @param {string} key
+     * @param {(key: string) => string} lookup
+     * @param {Record<string, string> | null} [fallback]
+     * @returns {string}
+     */
+    function translateKey(preference, key, lookup, fallback) {
+      const language = preference === 'zh' ? 'zh' : (preference === 'en' ? 'en' : null);
+      const table = composerDictionary(language === 'zh' ? 'zh' : 'en');
+      if (language !== null) return table[key] ?? key;
+      const own = fallback === null || fallback === undefined ? table : fallback;
+      let text = '';
+      try {
+        text = String(lookup(key) ?? '');
+      } catch (error) {
+        text = '';
+      }
+      // `t(key)` echoes the key itself when the namespace has no entry, and the
+      // settings namespace answers `NS.key`-style keys; neither is copy.
+      if (text !== '' && text !== key && text !== NS + '.' + key && text !== SETTINGS_NS + '.' + key) return text;
+      return own[key] ?? table[key] ?? key;
+    }
+
+    /**
      * The copy for the plugin's own surfaces.
      *
      * `preference` is the user's language setting (`auto`, `zh`, `en`): a pinned
-     * language reads the built-in table and ignores DSH's active locale, so the
-     * page can run in English while the search panel is Chinese. Under `auto`
-     * the host's dictionary wins; a host without the locale service, or one
-     * that has not registered this namespace yet, falls back to the built-in
-     * English copy instead of showing raw keys.
+     * language ignores DSH's active locale, so the page can run in English while
+     * the search panel is Chinese. Under `auto` the language is DSH's active
+     * locale, read live on each call, so switching DSH's language moves the
+     * panel with it.
      */
     function makeTranslate(ctx, preference, extra) {
-      const table = composerDictionary(preference === 'zh' ? 'zh' : 'en');
-      const own = extra === null || extra === undefined ? table : { ...table, ...extra };
+      const own = composerDictionary(effectiveLanguage(ctx, preference));
+      const table = extra === null || extra === undefined ? own : { ...own, ...extra };
       return (key) => {
-        if (preference === 'zh' || preference === 'en') return own[key] ?? key;
-        let current = null;
-        try {
-          current = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
-        } catch (error) {
-          current = null;
-        }
-        if (current === null || current === undefined) return own[key] ?? key;
-        const text = current.bind(NS)(key);
-        if (text === key) return own[key] ?? key;
-        if (text !== SETTINGS_NS + '.' + key && text !== NS + '.' + key) return text;
-        return own[key] ?? key;
+        if (preference === 'zh' || preference === 'en') return table[key] ?? key;
+        // `auto` resolves the language on every call, so a DSH language switch
+        // reaches the panel even before the overlay re-renders.
+        const fallback = composerDictionary(effectiveLanguage(ctx, 'auto'));
+        const face = localeFace(ctx);
+        if (face === null || typeof face.bind !== 'function') return fallback[key] ?? table[key] ?? key;
+        const t = face.bind(NS);
+        return translateKey('auto', key, (k) => t(k), fallback);
       };
     }
 
@@ -422,6 +478,83 @@ window.__ModuleLoader__.load({
         if (text !== '') messages.push({ role: 'assistant', seq: event.seq, text });
       }
       return messages;
+    }
+
+    /**
+     * Where the first frame of a glide is, and whether there is anything to do.
+     * Every press starts from the reader's live position; a key repeat only
+     * adds one page of lead on the glide already running, and a press against a
+     * running glide turns it around. A press with no room left in its own
+     * direction (measured against the scroll extent, never a same-sign offset)
+     * asks the caller to stop instead of animating in place.
+     * @param {{ scrollTop: number, scrollHeight: number, clientHeight: number }} metrics
+     * @param {number} target the glide's current target, if one is running
+     * @param {number} delta
+     * @param {boolean} repeat
+     * @returns {{ from: number, target: number, limit: number, atEdge: boolean }}
+     */
+    function glideFrame(metrics, target, delta, repeat) {
+      const limit = Math.max(0, metrics.scrollHeight - metrics.clientHeight);
+      const position = Math.max(0, Math.min(limit, metrics.scrollTop));
+      const direction = Math.sign(delta);
+      const lead = target - position;
+      // A key repeat keeps at most one page of lead on the glide it is holding:
+      // repeating an existing target leaves it alone, and repeating against it
+      // stops at the current position instead of swinging the other way.
+      const next = repeat && Math.sign(lead) === direction && Math.abs(lead) > Math.abs(delta)
+        ? target
+        : position + delta;
+      const clamped = Math.max(0, Math.min(limit, next));
+      const edge = direction > 0 ? position >= limit - 0.5 : position <= 0.5;
+      return { from: position, target: clamped, limit, atEdge: edge || clamped === position };
+    }
+
+    /**
+     * One frame of the preview glide: how many whole pixels to move, signed in
+     * the travel's own direction. `remaining` is signed (negative while moving
+     * up); the sign must come from it, never from a rounded magnitude, or an
+     * upward glide walks downward one pixel per frame.
+     * @param {number} remaining target - scrollTop
+     * @param {number} elapsed milliseconds since the previous frame
+     * @param {number} [tau] easing time constant
+     * @returns {number} pixels, never 0 unless `remaining` is already sub-pixel
+     */
+    function glideStep(remaining, elapsed, tau) {
+      const time = Number.isFinite(tau) && tau > 0 ? tau : PREVIEW_SCROLL_TAU;
+      const seconds = Number.isFinite(elapsed) ? Math.min(64, Math.max(0, elapsed)) : 0;
+      const left = Math.abs(remaining);
+      if (left < 1) return 0;
+      const travel = Math.max(1, Math.floor(left * (1 - Math.exp(-seconds / time))));
+      return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
+    }
+
+    /** The keys that page the reply preview, and the direction each one travels. */
+    function pageDirection(key) {
+      if (key === 'PageDown') return 1;
+      if (key === 'PageUp') return -1;
+      return 0;
+    }
+
+    /**
+     * What one `PgUp` / `PgDn` press does, decided without the DOM:
+     *
+     * - previews turned off in Settings: `none`, the key keeps its native meaning;
+     * - no preview shown yet: `open` it, then page it once the scroller exists;
+     * - room left in the travel direction: `scroll` one page;
+     * - already at that edge: `step` the selection one row, instead of leaving
+     *   the key to the chat viewport, which reads as "no response".
+     *
+     * @param {number} delta -1 for PgUp, 1 for PgDn, 0 for any other key
+     * @param {boolean} previewVisible
+     * @param {boolean} allowPreview
+     * @param {boolean} atEdge
+     * @returns {{ action: 'scroll' | 'open' | 'step' | 'none', delta: number }}
+     */
+    function pagePlan(delta, previewVisible, allowPreview, atEdge) {
+      if (delta === 0 || !allowPreview) return { action: 'none', delta };
+      if (!previewVisible) return { action: 'open', delta };
+      if (atEdge) return { action: 'step', delta };
+      return { action: 'scroll', delta };
     }
 
     /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
@@ -815,13 +948,24 @@ window.__ModuleLoader__.load({
     const SETTING_TAB_ID = 'prompt-peek';
 
     /**
+     * The Settings sidebar row's label. The slot table calls it outside any
+     * render, so it resolves the language live: the pinned preference when the
+     * user set one, DSH's active locale under `auto`.
+     */
+    function translateSettingsKey(ctx, language, key) {
+      const dictionary = settingsDictionary(language === 'zh' ? 'zh' : 'en');
+      const value = dictionary[key];
+      return typeof value === 'string' ? value : key;
+    }
+
+    /**
      * Where the plugin's own page lives, named in the footer of the search panel
      * when its preview is off. Opening Settings from script would depend on a
      * shell API the plugin does not own.
      */
     function settingsLocation(ctx) {
-      const language = effectiveLanguage(ctx, 'auto') === 'zh' ? 'zh' : 'en';
-      return (language === 'zh' ? '设置 → ' : 'Settings → ') + settingsDictionary(language).settingsNav;
+      return (effectiveLanguage(ctx, 'auto') === 'zh' ? '设置 → ' : 'Settings → ')
+        + translateSettingsKey(ctx, effectiveLanguage(ctx, 'auto'), 'settingsNav');
     }
 
     /** Numeric bounds the Settings page enforces before it saves, mirroring the host. */
@@ -834,19 +978,6 @@ window.__ModuleLoader__.load({
       previewPageSize: 'previewPageSizeLabel',
       historyLimit: 'historyLimitLabel',
     };
-
-    /** Effective language of the plugin copy once a preference is applied to the DSH locale. */
-    function effectiveLanguage(ctx, preference) {
-      if (preference === 'zh' || preference === 'en') return preference;
-      try {
-        const current = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
-        const snapshot = current === null || current === undefined ? null : current.getSnapshot();
-        const active = snapshot === null || snapshot === undefined ? '' : String(snapshot.active);
-        return active.toLowerCase().startsWith('zh') ? 'zh' : 'en';
-      } catch (error) {
-        return 'en';
-      }
-    }
 
     /** The globe used by the sidebar's and the nav row's language control. */
     function GlobeIcon(props) {
@@ -1023,7 +1154,7 @@ window.__ModuleLoader__.load({
         const preference = draft[0] !== null && draft[0] !== undefined && (draft[0].locale === 'zh' || draft[0].locale === 'en')
           ? draft[0].locale
           : state.language;
-        const language = preference === 'zh' ? 'zh' : 'en';
+        const language = effectiveLanguage(ctx, preference);
         const t = (key) => {
           const dictionary = settingsDictionary(language);
           const value = dictionary[key] ?? settingsDictionary('en')[key];
@@ -1336,6 +1467,25 @@ window.__ModuleLoader__.load({
     }
 
     return {
+      /**
+       * Pure helpers, reachable from `test/` without a browser or a slot
+       * runtime: the client entry runs its factory at load, and the module
+       * loader hands the result back to Node. Nothing here touches `window`,
+       * `document`, or a live ctx.
+       */
+      internals: Object.freeze({
+        BASE_DICTIONARY,
+        composerDictionary,
+        settingsDictionary,
+        effectiveLanguage,
+        translateKey,
+        makeTranslate,
+        localeFace,
+        pageDirection,
+        pagePlan,
+        glideFrame,
+        glideStep,
+      }),
       inject: ['slots'],
       apply(ctx) {
         const locale = ctx.get('locale');
@@ -1393,7 +1543,6 @@ window.__ModuleLoader__.load({
 
         /** The copy for the composer surfaces, readable from key handlers as well as render. */
         const copy = () => makeTranslate(ctx, settingsStore.get().preference);
-        const settingsCopy = () => settingsDictionary(settingsStore.get().language === 'zh' ? 'zh' : 'en');
 
         /**
          * The plugin's settings document, mirrored for every surface that reads
@@ -1500,12 +1649,21 @@ window.__ModuleLoader__.load({
         );
 
         if (locale !== undefined && locale !== null) {
-          // The dictionaries feed the `auto` language; a pinned language reads the
-          // built-in copy instead, so both paths agree key for key.
-          ctx.effect(() => locale.register(NS, 'zh', composerDictionary('zh')), 'prompt-peek: zh dictionary');
-          ctx.effect(() => locale.register(NS, 'en', BASE_DICTIONARY), 'prompt-peek: en dictionary');
-          ctx.effect(() => locale.register(SETTINGS_NS, 'zh', settingsDictionary('zh')), 'prompt-peek: settings zh dictionary');
-          ctx.effect(() => locale.register(SETTINGS_NS, 'en', settingsDictionary('en')), 'prompt-peek: settings en dictionary');
+          // The dictionaries feed the `auto` language; a pinned language reads
+          // the same tables directly, so both paths agree key for key. The
+          // service throws on a duplicate namespace/locale (a reload of this
+          // plugin alone), and the earlier registration stays in force.
+          const register = (ns, language, dictionary, label) => {
+            try {
+              ctx.effect(() => locale.register(ns, language, dictionary), label);
+            } catch (error) {
+              console.warn('prompt-peek: could not register the ' + language + ' dictionary for ' + ns, error);
+            }
+          };
+          register(NS, 'zh', composerDictionary('zh'), 'prompt-peek: zh dictionary');
+          register(NS, 'en', BASE_DICTIONARY, 'prompt-peek: en dictionary');
+          register(SETTINGS_NS, 'zh', settingsDictionary('zh'), 'prompt-peek: settings zh dictionary');
+          register(SETTINGS_NS, 'en', settingsDictionary('en'), 'prompt-peek: settings en dictionary');
         }
 
         function ComposerHistory(props) {
@@ -1526,7 +1684,7 @@ window.__ModuleLoader__.load({
           const rootRef = React.useRef(null);
           const panelRef = React.useRef(null);
           const previewRef = React.useRef(null);
-          const scrollAnimRef = React.useRef({ frame: 0, target: 0, held: false, direction: 0 });
+          const scrollAnimRef = React.useRef({ frame: 0, target: 0, repeat: false, direction: 0 });
           const inputRef = React.useRef(null);
           const listRef = React.useRef(null);
           const editorRef = React.useRef(null);
@@ -1708,7 +1866,29 @@ window.__ModuleLoader__.load({
                 stepBrowse(key === 'ArrowUp' ? -1 : 1);
                 return;
               }
+              if (pageDirection(key) !== 0) {
+                // Paging the reply preview while browsing: the preview is not
+                // open yet, so the press opens it for the browsed prompt instead
+                // of scrolling the chat behind the composer.
+                event.preventDefault();
+                event.stopPropagation();
+                openSearch();
+                return;
+              }
               if (!modifier && key !== 'Shift' && key !== 'Control' && key !== 'Meta' && key !== 'Alt') exitBrowse(false);
+              return;
+            }
+            if (pageDirection(key) !== 0 && !modifier) {
+              // The panel owns PgUp / PgDn, so the transcript behind the
+              // composer never scrolls on a key the user typed into the field.
+              event.preventDefault();
+              event.stopPropagation();
+              // With the panel hidden the key pages the selected prompt's reply:
+              // turn the preview on (it doubles as "page") and open the panel.
+              if (allowPreview) {
+                setPreviewOpen(true);
+                openSearch();
+              }
               return;
             }
             if (!modifier && !event.shiftKey && key === 'ArrowUp' && phaseRef.current === 'plain' && draftRef.current.trim() === '') {
@@ -1844,35 +2024,49 @@ window.__ModuleLoader__.load({
               cancelAnimationFrame(animation.frame);
               animation.frame = 0;
             }
-            animation.held = false;
+            animation.repeat = false;
             animation.direction = 0;
           };
 
           /**
-           * Glide the preview by `delta` pixels instead of jumping. Discrete presses queue onto
-           * the running target, while a held key only keeps one page of lead so it cannot race
-           * ahead; a wheel or a drag cancels the glide so the reader never fights it. `snap`
-           * false places the preview directly, for revealing a match on open.
+           * Glide the preview by `delta` pixels instead of jumping. Every press
+           * starts from the reader's position, replaces any running target, and
+           * turns the glide around when it points the other way; a key repeat
+           * keeps one page of lead so it cannot race ahead. A wheel or a drag
+           * cancels the glide so the reader never fights it. `snap` false places
+           * the preview directly, for revealing a match on open.
+           *
+           * @returns {boolean} whether the press had room to move the preview
            */
           const scrollPreviewBy = (delta, repeat, snap) => {
             const scroller = previewRef.current;
-            if (scroller === null || scroller === undefined) return;
+            if (scroller === null || scroller === undefined) return false;
             const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-            if (limit <= 0) return;
+            if (limit <= 0) {
+              // Nothing to scroll yet (a short reply, or a preview that was just
+              // turned on): the caller falls back to moving the selection.
+              return false;
+            }
             const animation = scrollAnimRef.current;
-            animation.held = repeat === true;
-            // A discrete press steps exactly `delta` from where the preview is
-            // now; only a held key keeps one page of lead on a running glide.
-            const running = animation.frame !== 0 && repeat === true;
-            // A held key repeats far faster than the glide can move, so a repeat only ever
-            // keeps one page of lead; discrete presses may queue up.
-            const from = running && !repeat ? animation.target : scroller.scrollTop;
-            const target = Math.max(0, Math.min(limit, from + delta));
+            // Every press — discrete or a key repeat — starts from where the
+            // preview is now and, when a glide is still running, replaces its
+            // target. A press against the running direction turns the glide
+            // around; a repeat only adds one page of lead (see `glideFrame`).
+            const frame = glideFrame(scroller, animation.target, delta, repeat);
+            const target = frame.target;
+            animation.repeat = repeat === true;
+            animation.direction = Math.sign(delta);
+            if (frame.atEdge) {
+              // Nothing left in this direction: stop instead of gliding toward
+              // the edge the reader already reached.
+              stopPreviewScroll();
+              return false;
+            }
             animation.target = target;
             animation.queued = target;
             if (snap === false) {
               scroller.scrollTop = target;
-              return;
+              return true;
             }
             const reduced = typeof window !== 'undefined'
               && typeof window.matchMedia === 'function'
@@ -1880,9 +2074,11 @@ window.__ModuleLoader__.load({
             if (reduced || !pager.smooth) {
               stopPreviewScroll();
               scroller.scrollTop = target;
-              return;
+              return true;
             }
-            if (animation.frame !== 0) return;
+            // Already gliding: the new target replaces the old one and the
+            // running loop picks it up, in whichever direction it points.
+            if (animation.frame !== 0) return true;
             let previous = performance.now();
             const step = (now) => {
               const el = previewRef.current;
@@ -1895,40 +2091,111 @@ window.__ModuleLoader__.load({
               // Reflow can shorten the reply mid-glide; retarget so the loop always terminates.
               animation.target = Math.min(animation.target, Math.max(0, el.scrollHeight - el.clientHeight));
               const remaining = animation.target - el.scrollTop;
-              if (Math.abs(remaining) < 1) {
+              // A press that reverses a running glide lands here with a target
+              // on the other side of the current position; the frame below moves
+              // toward it in `remaining`'s own sign.
+              animation.direction = Math.sign(remaining);
+              // Whole pixels in the travel's own direction, so an upward glide
+              // can never be turned into a downward one (`glideStep` explains).
+              const applied = glideStep(remaining, elapsed, PREVIEW_SCROLL_TAU);
+              if (applied === 0) {
                 el.scrollTop = animation.target;
                 animation.frame = 0;
                 return;
               }
-              // scrollTop is applied in whole pixels by most engines; rounding a
-              // sub-pixel step either way leaves the same value and would make
-              // the next press start from a half-finished position. Count the
-              // applied pixels (in the travel's sign) instead of the raw delta,
-              // and keep the last pixel of a step for the following frame rather
-              // than snapping it early.
-              const advance = Math.max(1, remaining * (1 - Math.exp(-elapsed / PREVIEW_SCROLL_TAU)));
-              const applied = remaining > 0 ? Math.floor(advance) : Math.ceil(advance);
-              if (Math.abs(applied) >= 1) {
-                el.scrollTop += applied;
-                if (Math.abs(remaining) - Math.abs(applied) < 1) {
-                  el.scrollTop = animation.target;
-                  animation.frame = 0;
-                  return;
-                }
+              const before = el.scrollTop;
+              el.scrollTop = before + applied;
+              // A short reply can stop accepting scrollTop mid-glide; ending
+              // here beats spinning frames that move nothing.
+              if (el.scrollTop === before) {
+                animation.frame = 0;
+                return;
+              }
+              if (Math.abs(remaining) - Math.abs(applied) < 1) {
+                el.scrollTop = animation.target;
+                animation.frame = 0;
+                return;
               }
               animation.frame = requestAnimationFrame(step);
             };
             animation.frame = requestAnimationFrame(step);
+            return true;
           };
 
+          /** Whether the preview still has room to travel in `delta`'s direction. */
+          const previewAtEdge = (delta) => {
+            const scroller = previewRef.current;
+            if (scroller === null || scroller === undefined) return true;
+            const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            return delta > 0 ? scroller.scrollTop >= limit - 0.5 : scroller.scrollTop <= 0.5;
+          };
+
+          /**
+           * Move the selected row by one, clamped. Returns whether there is
+           * anywhere to go, so the key is only swallowed when it does something.
+           */
+          const stepSelection = (delta) => {
+            const count = matchesRef.current.length;
+            if (count === 0) return false;
+            const current = panel === null ? 0 : Math.min(panel.selected, count - 1);
+            if (current + delta < 0 || current + delta > count - 1) return false;
+            setPanel((previous) => {
+              if (previous === null) return previous;
+              const next = Math.max(0, Math.min(count - 1, previous.selected + delta));
+              return next === previous.selected ? previous : { query: previous.query, selected: next };
+            });
+            return true;
+          };
+
+          /**
+           * One `PgUp` / `PgDn` press while the search panel is open. Returns
+           * whether the press was handled, so the caller only prevents the
+           * default when the panel actually did something with it.
+           */
+          const pageKey = (key, repeat) => {
+            const delta = pageDirection(key);
+            if (delta === 0) return false;
+            const plan = pagePlan(delta, previewVisible, allowPreview, previewAtEdge(delta));
+            if (plan.action === 'none') return false;
+            if (plan.action === 'open') {
+              // No preview yet: turn it on and page it once the scroller exists.
+              // The key must still not reach the chat viewport, or it scrolls
+              // the transcript behind the panel.
+              pendingPageRef.current = delta;
+              setPreviewOpen(true);
+              return true;
+            }
+            // Swallow the key even when it merely moves the selection: PgUp /
+            // PgDn belong to the panel, never to the transcript behind it.
+            if (plan.action === 'scroll' && scrollPreviewBy(delta * pager.page, repeat, true)) return true;
+            stepSelection(delta);
+            return true;
+          };
+
+          // A `PgUp` / `PgDn` pressed while the preview was still hidden turns
+          // the preview on and remembers the direction here; the next frame,
+          // once the scroller exists, moves it one page. It is consumed once.
+          const pendingPageRef = React.useRef(0);
+          React.useEffect(() => {
+            const pending = pendingPageRef.current;
+            if (pending === 0 || !previewVisible) return;
+            pendingPageRef.current = 0;
+            scrollPreviewBy(pending * pager.page, false, true);
+          }, [previewVisible, previewText]);
+
+          /**
+           * Releasing `PgUp` / `PgDn` after a held key ends its glide, so the
+           * preview never keeps travelling to a page target the reader stopped
+           * asking for. A discrete press is already on its way to exactly one
+           * page and lands there.
+           */
           const onQueryKeyUp = (event) => {
             const key = typeof event.key === 'string' ? event.key : '';
-            const animated = key === 'PageDown' || key === 'PageUp' || key === 'ArrowDown' || key === 'ArrowUp';
-            if (!animated) return;
+            if (key !== 'PageDown' && key !== 'PageUp') return;
             const animation = scrollAnimRef.current;
-            if (animation.held !== true) return;
-            animation.held = false;
-            stopPreviewScroll();
+            const held = animation.repeat === true;
+            animation.repeat = false;
+            if (held) stopPreviewScroll();
           };
 
           React.useEffect(() => stopPreviewScroll, [selected, previewOpen, previewText]);
@@ -1972,7 +2239,6 @@ window.__ModuleLoader__.load({
             if (running && (Math.sign(delta) !== animation.direction || animation.target <= 0 || animation.target >= limit)) {
               stopPreviewScroll();
             }
-            animation.held = 'wheel';
             animation.direction = Math.sign(delta);
             if (animation.frame !== 0) {
               // Retarget the glide by the notch instead of restarting it, so a
@@ -2002,12 +2268,12 @@ window.__ModuleLoader__.load({
               setPreviewOpen((open) => !open);
               return;
             }
-            if (previewVisible && (key === 'PageDown' || key === 'PageUp')) {
+            if (pageDirection(key) !== 0) {
+              // Handled by `pageKey` whether the preview is visible or not, so
+              // the key never falls through to the chat viewport's scrolling.
+              if (!pageKey(key, event.repeat === true)) return;
               event.preventDefault();
               event.stopPropagation();
-              // A key repeat restarts from the slider's value, never from a
-              // running target, so holding a key cannot outrun the setting.
-              scrollPreviewBy(key === 'PageDown' ? pager.page : -pager.page, event.repeat === true);
               return;
             }
             if (key === 'ArrowDown' || key === 'ArrowUp') {
@@ -2128,7 +2394,7 @@ window.__ModuleLoader__.load({
                   ? h('span', { className: 'dsh-pp-hint__group' }, keycap(translate('keySpace')), translate(previewShown ? 'hintHidePreview' : 'hintPreview'))
                   : null,
                 allowPreview ? h('span', { className: 'dsh-pp-hint__group' }, keycap('Shift'), keycap(translate('keySpace')), translate('hintTypeSpace')) : null,
-                previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, keycap('PgUp'), keycap('PgDn'), translate('hintPage')) : null,
+                allowPreview ? h('span', { className: 'dsh-pp-hint__group' }, keycap('PgUp'), keycap('PgDn'), translate('hintPage')) : null,
                 previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, translate('hintWheel')) : null,
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Enter'), translate('hintInsert')),
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Esc'), translate('hintClose')),
@@ -2156,13 +2422,12 @@ window.__ModuleLoader__.load({
         // buried inside the built-in plugins section. The section is built once
         // and mounted on first selection by the settings shell.
         const PromptPeekSettings = createSettingsPage(ctx, settingsStore, useSettings, useLocaleRevision);
-        const settingsLabel = (key) => () => settingsCopy()[key];
+        const settingsLabel = (key) => () => translateSettingsKey(ctx, settingsStore.get().language, key);
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: SETTING_TAB_ID,
           order: 40,
           label: settingsLabel('settingsNav'),
-          locale: SETTINGS_NS,
         }, PromptPeekSettings));
         ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
           name: 'settings.section.icon',

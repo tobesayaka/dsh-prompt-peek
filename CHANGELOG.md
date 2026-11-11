@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.4 - 2026-11-11
+
+### Fixed
+
+- **Interface language never followed DSH.** Under `auto`, the panel asked the
+  locale service for a translation and then treated *any* echo of the key as
+  "host has no dictionary", so a Chinese interface always fell back to the
+  built-in English copy; only a pinned `中文` looked translated. Language is now
+  resolved from DSH's active locale (`zh`, `zh-CN`, …) on every call, the host
+  dictionary is preferred when it has an entry, and the built-in table for the
+  active language is the fallback. The Settings page and its sidebar row follow
+  the same rule.
+- **`PgUp` / `PgDn` appeared to do nothing.** The key was only handled while the
+  reply preview was already visible; otherwise it reached the chat viewport and
+  scrolled the transcript behind the panel, and presses from the preview itself
+  or from history browsing were not handled at all. Now:
+  - the first press opens the preview (if enabled in Settings) and pages it;
+  - at the preview's top or bottom edge the press moves the selection to the
+    previous or next prompt instead of silently stopping;
+  - a press that finds nothing to scroll (a short reply) also steps the
+    selection, and a discrete press always starts from where the preview is, so
+    it cannot inherit a half-finished glide;
+  - with previews off in Settings, or with a modifier held, the key keeps its
+    native meaning.
+- **`PgUp` scrolled the preview *down*, slowly, and nothing stopped it.**
+  Since 0.3.3 the glide computed its per-frame step with
+  `remaining > 0 ? Math.floor(advance) : Math.ceil(advance)` while `remaining`
+  was already signed: going up, `advance` was `-1`-ish, `Math.ceil(-0.99)` is
+  `0`, and the surrounding `Math.max(1, …)` turned it into **+1**. Every frame
+  then moved the preview one pixel *down*, and PgDn only masked it because its
+  steps were large. The step is now a whole pixel count in the travel's own
+  sign (`glideStep`), so an upward glide can never be inverted.
+- **`PgUp` during a `PgDn` glide kept going down.** The first fix sized each
+  press from where the *previous* glide was heading, so a press while a glide
+  was in flight could resolve to a target behind the current position: the
+  preview then drifted further down and nothing cancelled it until it reached
+  that stale target. Every press now starts from the live `scrollTop`, a press
+  against the running direction turns the glide around, a key repeat only keeps
+  one page of lead, and releasing `PgUp` / `PgDn` after a held key stops it.
+
+### Added
+
+- `test/client.test.mjs`: the client's translation, key-routing, and glide
+  decision tables run without a browser, including a frame-by-frame simulation
+  of a `PgUp` pressed while a `PgDn` glide is still in flight, and of the
+  signed per-frame step that inverted it (25 tests in total with the Host
+  suite).
+
 ## 0.3.3 - 2026-11-11
 
 ### Fixed
