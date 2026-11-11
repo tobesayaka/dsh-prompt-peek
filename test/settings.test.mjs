@@ -129,6 +129,10 @@ test('reset removes the file and returns to the profile baseline', async () => {
   const body = await response.json();
   assert.equal(body.values.previewPageSize, 120);
   assert.throws(() => readFileSync(join(home, 'prompt-peek', 'settings.json'), 'utf8'));
+  // The slider's range and the Host's bounds agree.
+  const accepted = await route.fetch(request('POST', { values: { previewPageSize: 1200 } }));
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).values.previewPageSize, 1200);
 });
 
 test('rejects malformed settings without touching the file', async () => {

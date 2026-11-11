@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.2 - 2026-11-11
+
+### Fixed
+
+- `PgUp` / `PgDn` and the setting disagreed about distance. The setting was
+  labelled "lines per page" but scrolled a pixel value, a discrete press
+  queued onto a running glide (so a second press moved further than set), a
+  wheel notch moved a variable pixel amount for `deltaY: 100`, and the slider
+  range (40–600) sat below the default (180 px ≈ 10 lines at 18 px).
+  - The option is now **Page distance**, measured in pixels: 180 px by
+    default, adjustable 60–1200 (the Host bounds match).
+  - Every `PgUp` / `PgDn` moves exactly that distance from where the preview
+    is now; a held key keeps at most one page of lead, it no longer compounds.
+  - One wheel notch moves exactly a quarter page.
+
 ## 0.3.1 - 2026-11-11
 
 ### Fixed

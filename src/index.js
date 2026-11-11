@@ -39,7 +39,7 @@ const DEFAULTS = Object.freeze({
   showPreview: true,
   /** Glide the preview between pages instead of jumping. */
   smoothScroll: true,
-  /** Lines of the reply preview moved by PgUp / PgDn and the wheel gesture. */
+  /** Pixels one PgUp / PgDn moves the reply preview; a wheel notch moves a quarter. */
   previewPageSize: 180,
   /** Most recent prompts read from the session for recall. */
   historyLimit: 300,
@@ -48,7 +48,7 @@ const DEFAULTS = Object.freeze({
 });
 
 const SETTINGS_LIMITS = {
-  previewPageSize: [40, 600],
+  previewPageSize: [60, 1200],
   historyLimit: [20, 1000],
 };
 

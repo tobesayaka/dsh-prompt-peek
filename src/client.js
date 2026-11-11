@@ -37,6 +37,8 @@ window.__ModuleLoader__.load({
     const MAX_REPLY = 6000;
     const REPLY_TAIL = 400;
     const PREVIEW_PAGE = 180;
+    /** Bounds of the "lines per page" setting: pixels one PgUp / PgDn moves. */
+    const PAGE_RANGE = [60, 1200];
     const PREVIEW_SCROLL_TAU = 100;
     const EMPTY = [];
     /** Language ids the plugin can show, alongside their endonym labels. */
@@ -98,9 +100,9 @@ window.__ModuleLoader__.load({
           showPreviewHint: '在搜索面板中按空格预览该提示词得到的回答。',
           smoothScrollLabel: '平滑翻页',
           smoothScrollHint: 'PgUp / PgDn 平滑滚动预览，而不是直接跳动。已为减少动态效果的系统强制关闭。',
-          previewPageSizeLabel: '每页行数',
-          previewPageSizeValue: '{value} 行',
-          previewPageSizeHint: 'PgUp / PgDn 以及鼠标滚轮每次移动的行数。',
+          previewPageSizeLabel: '每页滚动距离',
+          previewPageSizeValue: '{value} px',
+          previewPageSizeHint: 'PgUp / PgDn 一次滚动的距离（像素）；鼠标滚轮一格的滚动距离是这个值的四分之一。',
           historyLimitLabel: '历史条数上限',
           historyLimitValue: '{value} 条',
           historyLimitHint: '最多读取当前会话最近发送的多少条提示词。',
@@ -120,7 +122,7 @@ window.__ModuleLoader__.load({
             locale: '界面语言',
             showPreview: '显示回答预览',
             smoothScroll: '平滑翻页',
-            previewPageSize: '每页行数',
+            previewPageSize: '每页滚动距离',
             historyLimit: '历史条数上限',
             browseOrder: '结果顺序',
           },
@@ -141,9 +143,9 @@ window.__ModuleLoader__.load({
         showPreviewHint: 'Let Space reveal the reply that prompt received inside the search panel.',
         smoothScrollLabel: 'Smooth paging',
         smoothScrollHint: 'Let PgUp / PgDn glide through the preview instead of jumping. Systems that ask for reduced motion always jump.',
-        previewPageSizeLabel: 'Lines per page',
-        previewPageSizeValue: '{value} lines',
-        previewPageSizeHint: 'How far PgUp, PgDn, and the mouse wheel move the reply preview at a time.',
+        previewPageSizeLabel: 'Page distance',
+        previewPageSizeValue: '{value} px',
+        previewPageSizeHint: 'How far one PgUp or PgDn press moves the reply preview, in pixels. One mouse-wheel notch moves a quarter of that.',
         historyLimitLabel: 'History limit',
         historyLimitValue: '{value} prompts',
         historyLimitHint: 'Keep at most this many of the most recently sent prompts of the session.',
@@ -163,7 +165,7 @@ window.__ModuleLoader__.load({
           locale: 'Interface language',
           showPreview: 'Show reply preview',
           smoothScroll: 'Smooth paging',
-          previewPageSize: 'Lines per page',
+          previewPageSize: 'Page distance',
           historyLimit: 'History limit',
           browseOrder: 'Result order',
         },
@@ -821,7 +823,7 @@ window.__ModuleLoader__.load({
 
     /** Numeric bounds the Settings page enforces before it saves, mirroring the host. */
     const SETTING_LIMITS = {
-      previewPageSize: [40, 600],
+      previewPageSize: PAGE_RANGE,
       historyLimit: [20, 1000],
     };
     /** Host fields that belong to a numeric row and its label. */
@@ -999,7 +1001,7 @@ window.__ModuleLoader__.load({
         locale: 'auto',
         showPreview: true,
         smoothScroll: true,
-        previewPageSize: 180,
+        previewPageSize: PREVIEW_PAGE,
         historyLimit: 300,
         browseOrder: 'newest',
       };
@@ -1190,7 +1192,7 @@ window.__ModuleLoader__.load({
                 type: 'range',
                 min: range[0],
                 max: range[1],
-                step: 10,
+                step: key === 'previewPageSize' ? 20 : 10,
                 value: shown,
                 'aria-label': label(key),
                 disabled,
@@ -1353,8 +1355,8 @@ window.__ModuleLoader__.load({
             ? values.previewPageSize
             : PREVIEW_PAGE;
           return {
+            /** Pixels per `PgUp` / `PgDn` and per wheel notch (a notch is a quarter page). */
             page: configured,
-            notch: Math.max(24, Math.round(configured / 4)),
             smooth: values === null || values === undefined || values.smoothScroll !== false,
           };
         };
@@ -1856,12 +1858,15 @@ window.__ModuleLoader__.load({
             if (limit <= 0) return;
             const animation = scrollAnimRef.current;
             animation.held = repeat === true;
-            const running = animation.frame !== 0;
+            // A discrete press steps exactly `delta` from where the preview is
+            // now; only a held key keeps one page of lead on a running glide.
+            const running = animation.frame !== 0 && repeat === true;
             // A held key repeats far faster than the glide can move, so a repeat only ever
             // keeps one page of lead; discrete presses may queue up.
             const from = running && !repeat ? animation.target : scroller.scrollTop;
             const target = Math.max(0, Math.min(limit, from + delta));
             animation.target = target;
+            animation.queued = target;
             if (snap === false) {
               scroller.scrollTop = target;
               return;
@@ -1931,9 +1936,10 @@ window.__ModuleLoader__.load({
           }, [previewVisible]);
 
           /**
-           * The wheel moves the preview one page per notch while the cursor is
-           * over the search box. A wheel gesture has no key-up, so it keeps
-           * animating until the accumulated delta turns around or settles.
+           * The wheel moves the preview a quarter page per notch while the
+           * cursor is over the search box. A wheel gesture has no key-up, so it
+           * keeps animating until the accumulated delta turns around or
+           * settles.
            */
           const onQueryWheel = (event) => {
             if (!previewVisible) return;
@@ -1941,18 +1947,29 @@ window.__ModuleLoader__.load({
             if (scroller === null || scroller === undefined) return;
             const limit = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
             if (limit <= 0) return;
-            const units = event.deltaMode === 1 ? 1 : (event.deltaMode === 2 ? pager.page / pager.notch : 1);
+            // One notch is a quarter of the configured page: wheel deltas arrive
+            // in arbitrary pixel amounts, so they are scaled onto that step.
+            const notch = Math.max(24, Math.round(pager.page / 4));
+            const units = event.deltaMode === 1 ? notch / 3 : (event.deltaMode === 2 ? notch : notch / 100);
             const delta = event.deltaY * units;
             if (delta === 0) return;
             event.preventDefault();
             event.stopPropagation();
             const animation = scrollAnimRef.current;
             const running = animation.frame !== 0;
-            if (running && Math.sign(delta) !== animation.direction) stopPreviewScroll();
-            else if (running && (animation.target <= 0 || animation.target >= limit)) return;
+            if (running && (Math.sign(delta) !== animation.direction || animation.target <= 0 || animation.target >= limit)) {
+              stopPreviewScroll();
+            }
             animation.held = 'wheel';
             animation.direction = Math.sign(delta);
-            scrollPreviewBy(delta > 0 ? pager.page : -pager.page, true);
+            if (animation.frame !== 0) {
+              // Retarget the glide by the notch instead of restarting it, so a
+              // continuous wheel gesture keeps one step per notch.
+              animation.queued = Math.max(0, Math.min(limit, animation.queued + delta));
+              animation.target = animation.queued;
+              return;
+            }
+            scrollPreviewBy(delta > 0 ? notch : -notch, true);
           };
 
           const onQueryKeyDown = (event) => {
@@ -1976,6 +1993,8 @@ window.__ModuleLoader__.load({
             if (previewVisible && (key === 'PageDown' || key === 'PageUp')) {
               event.preventDefault();
               event.stopPropagation();
+              // A key repeat restarts from the slider's value, never from a
+              // running target, so holding a key cannot outrun the setting.
               scrollPreviewBy(key === 'PageDown' ? pager.page : -pager.page, event.repeat === true);
               return;
             }
