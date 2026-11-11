@@ -69,6 +69,7 @@ window.__ModuleLoader__.load({
       previewTitle: "dsh's reply",
       previewMissing: 'No text reply is available in the loaded history.',
       previewOff: 'Reply preview is off',
+      turnOn: 'turn on',
       copyCode: 'Copy',
       copiedCode: 'Copied',
       codeLabel: 'Code',
@@ -195,6 +196,7 @@ window.__ModuleLoader__.load({
         previewTitle: 'dsh 的回答',
         previewMissing: '这一条在已加载的记录里没有文字回复。',
         previewOff: '回答预览已关闭',
+        turnOn: '重新开启',
         copyCode: '复制',
         copiedCode: '已复制',
         codeLabel: '代码',
@@ -271,7 +273,7 @@ window.__ModuleLoader__.load({
 .dsh-pp-preview__empty{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dsh-pp-hint{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 2px 0;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
 .dsh-pp-hint__group{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
-.dsh-pp-hint__where{margin-left:auto;opacity:.8;white-space:nowrap}
+.dsh-pp-hint__where{margin-left:auto;white-space:nowrap;border:0;padding:0;margin-top:0;margin-bottom:0;margin-right:0;background:none;color:var(--dsw-alias-brand-primary);font:inherit;font-size:11px;line-height:16px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .dsh-pp-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10px;line-height:1;font-family:inherit}
 .dsh-pp-md{font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary)}
 .dsh-pp-md__p{margin:0 0 6px;white-space:pre-wrap;word-break:break-word}
@@ -1284,6 +1286,34 @@ window.__ModuleLoader__.load({
             smooth: values === null || values === undefined || values.smoothScroll !== false,
           };
         };
+        /**
+         * Turn the reply preview back on from the search panel, then save it like
+         * the Settings page would. The panel updates at once; a failed save
+         * leaves the setting at its stored value after the next reload.
+         */
+        const enablePreview = () => {
+          savedOverrides.showPreview = true;
+          settingsStore.refresh();
+          // Save like the Settings page does, keeping the other fields at their
+          // stored values; if the save is refused the local value is rolled back
+          // so the panel and the file never disagree.
+          const patch = { ...settingsStore.get().values, showPreview: true };
+          void fetch(SETTINGS_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ values: { ...patch, locale: patch.locale === 'zh' || patch.locale === 'en' ? patch.locale : 'auto' } }),
+          }).then(async (response) => {
+            const data = await response.json().catch(() => null);
+            if (!response.ok || data === null || typeof data.values !== 'object') throw new Error('rejected');
+            savedOverrides.showPreview = data.values.showPreview !== false;
+            settingsStore.refresh();
+          }).catch((error) => {
+            savedOverrides.showPreview = false;
+            settingsStore.refresh();
+            console.error('prompt-peek: could not turn the reply preview back on', error);
+          });
+        };
+
         /** The copy for the composer surfaces, readable from key handlers as well as render. */
         const copy = () => makeTranslate(ctx, settingsStore.get().preference);
         const settingsCopy = () => settingsDictionary(settingsStore.get().language === 'zh' ? 'zh' : 'en');
@@ -1349,6 +1379,8 @@ window.__ModuleLoader__.load({
             },
             /** Re-read the effective language after DSH's own locale moved. */
             sync: notify,
+            /** Republish after a surface edited the document outside the page. */
+            refresh: notify,
             subscribe(listener) {
               listeners.add(listener);
               return () => {
@@ -1932,7 +1964,7 @@ window.__ModuleLoader__.load({
                 // The footer button and the preview are not focus stops; keep the
                 // query field focused so ↑ / ↓ / Space keep working after a click.
                 if (event.target !== null && event.target !== undefined && event.target.closest !== undefined
-                  && event.target.closest('a, button, input') !== null) return;
+                  && event.target.closest('a, button, input, [data-disallow-space]') !== null) return;
                 event.preventDefault();
                 focusQuery();
               },
@@ -1990,8 +2022,14 @@ window.__ModuleLoader__.load({
                 previewVisible ? h('span', { className: 'dsh-pp-hint__group' }, translate('hintWheel')) : null,
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Enter'), translate('hintInsert')),
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('Esc'), translate('hintClose')),
-                allowPreview ? null : h('span', { className: 'dsh-pp-hint__group dsh-pp-hint__where', title: translate('previewOff') },
-                  translate('previewOff'), ' · ', settingsLocation(ctx)),
+                allowPreview ? null : h('button', {
+                  type: 'button',
+                  className: 'dsh-pp-hint__group dsh-pp-hint__where',
+                  title: settingsLocation(ctx),
+                  onMouseDown: (event) => event.preventDefault(),
+                  onClick: () => enablePreview(),
+                  'data-disallow-space': 'true',
+                }, translate('previewOff'), ' · ', translate('turnOn')),
               ),
             ) : null,
           );

@@ -49,7 +49,7 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. |
-| Show reply preview | on | When off, `Space` no longer opens the reply preview; the footer says where to turn it back on. |
+| Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
 | Lines per page | 180 | How far one `PgUp` / `PgDn` and one wheel notch move the preview. |
 | History limit | 300 | How many of the session's most recent prompts recall and search read. |

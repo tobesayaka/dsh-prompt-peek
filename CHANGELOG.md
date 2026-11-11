@@ -22,7 +22,10 @@ All notable changes to this project are documented here. The format follows
   requires Connection, so profiles without it still load the plugin. `cordis.patch.yml` stays the baseline; the file holds
   overrides and "Reset to profile defaults" deletes it.
 - A mouse wheel over the search box pages the reply preview while it is open.
-- A footer note names the Settings page when the reply preview is turned off.
+- When the reply preview is turned off, the search panel's footer now offers
+  **turn on**, which saves the setting and brings the preview back immediately
+  (a toast-sized note with no way out made it look like `Space` had broken).
+  Hovering it still names the Settings section for the full options.
 
 ### Changed
 
