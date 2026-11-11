@@ -6,6 +6,7 @@ import test, { after } from 'node:test';
 
 import { apply, normalizeSettings, settingsPath } from '../src/index.js';
 
+
 const testHome = mkdtempSync(join(tmpdir(), 'dsh-prompt-peek-test-'));
 process.env.DSH_HOME = testHome;
 after(() => rmSync(testHome, { recursive: true, force: true }));
@@ -201,4 +202,23 @@ test('a profile without Connection still loads the plugin', () => {
   // The route lives in an optional child fiber, so `apply` must not throw when
   // the service is absent (nor register anything).
   assert.doesNotThrow(() => apply({ effect() {}, inject() {} }, {}));
+});
+
+test('the reply preview shares one parser with the history and survives interleaved events', () => {
+  // The client half has no browser in this runner. These are source-level
+  // guards for a regression that shipped once: history and preview walked the
+  // event window with two different filters, so an event between a prompt and
+  // its answer (an edit, a replacement, a tool call) hid the answer and the
+  // panel said "no text reply".
+  const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
+  const readMessages = source.indexOf('function readMessages(');
+  const readHistory = source.indexOf('function readHistory(');
+  const readReply = source.indexOf('function readReply(');
+  assert.ok(readMessages > 0 && readHistory > readMessages && readReply > readHistory);
+  // Both readers go through the shared scan.
+  assert.ok(source.slice(readHistory, readReply).includes('of readMessages(sessions, sessionId)'));
+  assert.ok(source.slice(readReply, readReply + 400).includes('const messages = readMessages(sessions, sessionId);'));
+  // The preview no longer keys on a filtered `surfaceOp === 'append'` walk.
+  const replyBody = source.slice(readReply, source.indexOf('/** First match highlighted', readReply));
+  assert.doesNotMatch(replyBody, /surfaceOp !== 'append'/u);
 });

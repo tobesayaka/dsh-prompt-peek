@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.1 - 2026-11-11
+
+### Fixed
+
+- **"No text reply is available" on prompts that clearly had one.** History and
+  the reply preview walked the event window with two different filters, so any
+  event between a prompt and its answer (an edit, a surface replacement, a tool
+  call) could hide the answer from the preview. Both now read one shared scan:
+  a human message is any `user/message` with `source.kind === 'user'`, an
+  assistant message is any event carrying `data.message.content` text, and
+  everything else stays in place. A prompt's own text also doubles as the key,
+  so a snapshot rebuilt between listing and previewing still matches.
+- **No preview after pressing Space.** The preview column only rendered when a
+  search hit was located; a prompt without a query produced "no text reply"
+  instead of the tail of the answer. The preview now renders whenever the
+  answer text exists, and a long answer is scrolled to the paragraph holding
+  the first search hit (measured against the scroller, so page scrolling no
+  longer skews it).
+- Turning "Show reply preview" back on from the search panel (see 0.3.0).
+
 ## 0.3.0 - 2026-11-11
 
 ### Added

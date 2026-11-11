@@ -346,7 +346,6 @@ window.__ModuleLoader__.load({
       return { card, editor };
     }
 
-    /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
     /**
      * Keep the newest `limit` prompts. The scan folds consecutive duplicates
      * before this trims, so the setting bounds what recall and search see rather
@@ -357,7 +356,31 @@ window.__ModuleLoader__.load({
       return history.length > bound ? history.slice(history.length - bound) : history;
     }
 
-    function readHistory(sessions, sessionId) {
+    /** Joined non-empty `text` blocks of one message; reasoning and tool blocks are excluded. */
+    function contentText(content) {
+      if (!Array.isArray(content)) return '';
+      const parts = [];
+      for (const block of content) {
+        if (block !== null && block !== undefined && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
+          parts.push(block.text.trim());
+        }
+      }
+      return parts.join('\n\n');
+    }
+
+    /**
+     * Every recorded message of the loaded event window, in event order.
+     *
+     * A human message is any `user/message` whose `data.source.kind` is `user`;
+     * an assistant message is any event carrying `data.message.content` text
+     * blocks. Nothing is classified by position, and events that are neither
+     * (edits, replacements, tool calls) simply do not hide their neighbours, so
+     * an answer keeps its prompt no matter what the Host interleaves.
+     * @param {any} sessions the `sessions` service, or undefined
+     * @param {string} sessionId
+     * @returns {ReadonlyArray<{ role: 'user' | 'assistant', seq: number, text: string }>}
+     */
+    function readMessages(sessions, sessionId) {
       if (sessions === undefined || sessions === null || sessionId === undefined || sessionId === null) return EMPTY;
       let binding;
       try {
@@ -375,80 +398,64 @@ window.__ModuleLoader__.load({
         return EMPTY;
       }
       if (snapshot === undefined || snapshot === null || !Array.isArray(snapshot.entries)) return EMPTY;
-      const history = [];
-      let previousText = null;
-      for (const entry of snapshot.entries) {
-        if (entry === null || entry === undefined || entry.type !== 'event') continue;
-        const event = entry.event;
-        if (event === null || event === undefined || event.type !== 'user/message') continue;
-        if (event.surfaceOp !== 'append') continue;
-        const data = event.data;
-        if (data === null || data === undefined) continue;
-        if (data.source === null || data.source === undefined || data.source.kind !== 'user') continue;
-        if (!Array.isArray(data.content)) continue;
-        let text = '';
-        for (const block of data.content) {
-          if (block !== null && block !== undefined && block.type === 'text' && typeof block.text === 'string') text += block.text;
-        }
-        if (text.trim() === '') continue;
-        if (text === previousText) continue;
-        previousText = text;
-        history.push({ key: 'h-' + String(event.seq), seq: event.seq, text, lower: text.toLowerCase() });
-      }
-      return limitHistory(history, MAX_HISTORY);
-    }
-
-    /** Typed text of one assistant message, reasoning and tool blocks excluded. */
-    function assistantText(content) {
-      if (!Array.isArray(content)) return '';
-      const parts = [];
-      for (const block of content) {
-        if (block !== null && block !== undefined && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
-          parts.push(block.text.trim());
-        }
-      }
-      return parts.join('\n\n');
-    }
-
-    /** The assistant answer recorded after one sent message, up to the next human message. */
-    function readReply(sessions, sessionId, seq) {
-      if (sessions === undefined || sessions === null || sessionId === undefined || sessionId === null) return null;
-      let binding;
-      try {
-        binding = sessions.binding(sessionId);
-      } catch (error) {
-        return null;
-      }
-      if (binding === undefined || binding === null) return null;
-      const source = binding.eventSource;
-      if (source === undefined || source === null || typeof source.getSnapshot !== 'function') return null;
-      let snapshot;
-      try {
-        snapshot = source.getSnapshot();
-      } catch (error) {
-        return null;
-      }
-      if (snapshot === undefined || snapshot === null || !Array.isArray(snapshot.entries)) return null;
-      let found = false;
-      const texts = [];
+      const messages = [];
       for (const entry of snapshot.entries) {
         if (entry === null || entry === undefined || entry.type !== 'event') continue;
         const event = entry.event;
         if (event === null || event === undefined) continue;
-        if (!found) {
-          if (event.type === 'user/message' && event.seq === seq) found = true;
+        const data = event.data;
+        if (data === null || data === undefined) continue;
+        if (event.type === 'user/message') {
+          if (data.source === null || data.source === undefined || data.source.kind !== 'user') continue;
+          const text = contentText(data.content);
+          if (text !== '') messages.push({ role: 'user', seq: event.seq, text });
           continue;
         }
-        if (event.type === 'user/message' && event.surfaceOp === 'append' && event.data !== null && event.data !== undefined
-          && event.data.source !== null && event.data.source !== undefined && event.data.source.kind === 'user') break;
-        if (event.type !== 'assistant/message' || event.surfaceOp !== 'append') continue;
-        const message = event.data === null || event.data === undefined ? null : event.data.message;
-        const text = assistantText(message === null || message === undefined ? null : message.content);
-        if (text !== '') texts.push(text);
-        if (texts.length >= 200) break;
+        const message = data.message;
+        if (message === null || message === undefined) continue;
+        const text = contentText(message.content);
+        if (text !== '') messages.push({ role: 'assistant', seq: event.seq, text });
       }
-      if (!found) return null;
-      // The closing reply carries the answer; short tails pull in the message before them.
+      return messages;
+    }
+
+    /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
+    function readHistory(sessions, sessionId) {
+      const history = [];
+      let previousText = null;
+      for (const message of readMessages(sessions, sessionId)) {
+        if (message.role !== 'user') continue;
+        if (message.text === previousText) continue;
+        previousText = message.text;
+        history.push({ key: 'h-' + String(message.seq), seq: message.seq, text: message.text, lower: message.text.toLowerCase() });
+      }
+      return limitHistory(history, MAX_HISTORY);
+    }
+
+    /**
+     * The assistant text recorded after one sent message, up to the next human
+     * message. `hold` is the row's own text: when the snapshot was rebuilt
+     * between listing and previewing and `seq` moved, the text still finds the
+     * prompt. The closing reply carries the answer; short tails pull in the
+     * message before them.
+     * @param {any} sessions
+     * @param {string} sessionId
+     * @param {number} seq
+     * @param {{ text: string } | null} [hold]
+     * @returns {{ text: string } | null}
+     */
+    function readReply(sessions, sessionId, seq, hold) {
+      const messages = readMessages(sessions, sessionId);
+      const start = messages.findIndex((message) => message.role === 'user'
+        && (message.seq === seq || (hold !== null && hold !== undefined && message.text === hold.text)));
+      if (start < 0) return null;
+      const texts = [];
+      for (let index = start + 1; index < messages.length && texts.length < 200; index += 1) {
+        const message = messages[index];
+        if (message.role === 'user') break;
+        texts.push(message.text);
+      }
+      if (texts.length === 0) return null;
       const chosen = [];
       let length = 0;
       for (let index = texts.length - 1; index >= 0 && length < REPLY_TAIL; index -= 1) {
@@ -572,9 +579,9 @@ window.__ModuleLoader__.load({
      */
     function matchAnchor(text, query) {
       const hit = query === '' ? -1 : String(text).toLowerCase().indexOf(query);
-      if (hit < 0) return null;
-      const range = previewWindow(text, hit);
-      return { offset: Math.min(range.start, hit) };
+      // Absolute offset into `text`; each renderer maps it into its own window,
+      // so a short reply and a cut one share this single value.
+      return hit < 0 ? null : { offset: hit };
     }
 
     /**
@@ -599,14 +606,78 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Markdown block boundaries: source offset ranges, in render order — the
+     * same walk the renderer takes below. The renderer draws one element per
+     * block, so these ranges also say which element holds a given offset.
+     * @param {ReadonlyArray<string>} lines
+     * @returns {ReadonlyArray<[number, number]>} inclusive offset ranges
+     */
+    function markdownSpans(lines) {
+      const spans = [];
+      const cursor = { start: 0, index: 0 };
+      const advance = () => {
+        const end = cursor.start + lines[cursor.index].length;
+        cursor.start = end + 1;
+        cursor.index += 1;
+        return end;
+      };
+      while (cursor.index < lines.length) {
+        const line = lines[cursor.index];
+        const lineStart = cursor.start;
+        let end = lineStart + line.length;
+        cursor.start = end + 1;
+        cursor.index += 1;
+        if (line.trim() === '') continue;
+        if (MD_FENCE.test(line)) {
+          while (cursor.index < lines.length && !/^```\s*$/u.test(lines[cursor.index])) end = advance();
+          if (cursor.index < lines.length) end = advance();
+        } else if (MD_QUOTE.test(line)) {
+          while (cursor.index < lines.length && MD_QUOTE.test(lines[cursor.index])) end = advance();
+        } else if (cursor.index < lines.length && line.includes('|') && MD_TABLE_SEP.test(lines[cursor.index])) {
+          end = advance();
+          while (cursor.index < lines.length && lines[cursor.index].trim() !== '' && lines[cursor.index].includes('|')) end = advance();
+        } else if (MD_UL.test(line)) {
+          while (cursor.index < lines.length && MD_UL.test(lines[cursor.index])) end = advance();
+        } else if (MD_OL.test(line)) {
+          while (cursor.index < lines.length && MD_OL.test(lines[cursor.index])) end = advance();
+        } else if (!MD_HEADING.test(line) && !MD_HR.test(line)) {
+          while (cursor.index < lines.length && lines[cursor.index].trim() !== '' && !isMdBoundary(lines[cursor.index])) end = advance();
+        }
+        spans.push([lineStart, end]);
+      }
+      return spans;
+    }
+
+    /**
+     * Index of the block holding character `offset`, or -1 when the offset
+     * falls between blocks (blank lines).
+     * @param {ReadonlyArray<[number, number]>} spans from {@link markdownSpans}
+     * @param {number} offset
+     */
+    function markdownBlockAt(spans, offset) {
+      for (let index = 0; index < spans.length; index += 1) {
+        const [from, to] = spans[index];
+        if (offset >= from && offset <= to) return index;
+        if (offset < from) return -1;
+      }
+      return -1;
+    }
+
+    /**
      * Compact Markdown renderer for recorded replies: no HTML, links restricted
      * to http(s), mailto, and anchors. `options.labels` overrides the code-block
-     * captions; there are no options besides that, so the renderer stays a pure
-     * function of its text.
+     * captions; `options.focus` (`{ offset }`) marks the block holding that
+     * character offset so the preview can scroll to the first match.
      */
     function renderMarkdown(source, options) {
       const labels = options === null || options === undefined ? null : options.labels;
-      const lines = String(source).replace(/\r\n?/gu, '\n').split('\n');
+      const focusOffset = options !== null && options !== undefined && options.focus !== null && options.focus !== undefined
+        && typeof options.focus.offset === 'number'
+        ? options.focus.offset
+        : null;
+      const text = String(source).replace(/\r\n?/gu, '\n');
+      const lines = text.split('\n');
+      const focus = focusOffset === null ? -1 : markdownBlockAt(markdownSpans(lines), focusOffset);
       const blocks = [];
       let index = 0;
       while (index < lines.length) {
@@ -694,12 +765,13 @@ window.__ModuleLoader__.load({
 
       const children = blocks.map((block, blockIndex) => {
         const key = 'md' + blockIndex;
+        const mark = focus === blockIndex ? ' dsh-pp-md__focus' : '';
         if (block.type === 'code') {
           return renderCodeBlock(block, key, labels);
         }
         if (block.type === 'heading') {
           const level = Math.min(block.level, 3);
-          return h('div', { key, className: 'dsh-pp-md__h dsh-pp-md__h' + level }, renderInline(block.text, key));
+          return h('div', { key, className: 'dsh-pp-md__h dsh-pp-md__h' + level + mark }, renderInline(block.text, key));
         }
         if (block.type === 'hr') return h('hr', { key, className: 'dsh-pp-md__hr' });
         if (block.type === 'quote') return h('blockquote', { key, className: 'dsh-pp-md__quote' }, renderInline(block.text, key));
@@ -729,7 +801,7 @@ window.__ModuleLoader__.load({
           }, renderInline(cell, key + 'r' + rowIndex + 'c' + cellIndex)))));
           return h('table', { key, className: 'dsh-pp-md__table' }, h('thead', null, head), h('tbody', null, rows));
         }
-        return h('p', { key, className: 'dsh-pp-md__p' }, renderInline(block.text, key));
+        return h('p', { key, className: 'dsh-pp-md__p' + mark }, renderInline(block.text, key));
       });
       return h('div', { className: 'dsh-pp-md' }, children);
     }
@@ -1583,13 +1655,17 @@ window.__ModuleLoader__.load({
             wrap: translate('wrapCode'),
             unwrap: translate('unwrapCode'),
           }), [copy]);
-          // A long prompt shows its tail; the first search match widens that
-          // window so the selected row shows why it matched.
-          const shown = previewAnchor === null ? null : previewWindow(previewText, previewAnchor.offset);
-          const previewNodes = React.useMemo(
-            () => (shown === null ? null : renderMarkdown(shown.text, codeLabels)),
-            [previewText, codeLabels, previewAnchor],
-          );
+          const previewNodes = React.useMemo(() => {
+            if (previewText === null || previewText === undefined) return null;
+            // A long prompt shows its tail; the first search match widens that
+            // window, and the renderer marks the block holding it so the
+            // preview can scroll there — the selected row then shows why it
+            // matched instead of only its head.
+            const anchor = previewAnchor === null ? -1 : previewAnchor.offset;
+            const shown = previewWindow(previewText, anchor);
+            const focus = anchor < 0 ? null : { offset: Math.max(0, anchor - shown.start) };
+            return renderMarkdown(shown.text, { labels: codeLabels, focus });
+          }, [previewText, codeLabels, previewAnchor]);
           const previewShown = previewOpen && matches.length > 0;
           const previewVisible = previewShown && allowPreview;
           const pager = pagePager({
@@ -1733,8 +1809,9 @@ window.__ModuleLoader__.load({
             if (!previewVisible || scroller === null || scroller === undefined) return;
             const hit = scroller.querySelector('.dsh-pp-md__focus');
             if (hit === null || hit === undefined) return;
-            const head = hit.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-            const offset = head + scroller.scrollTop - 12;
+            // `offsetTop` is measured against the offset parent, the scroller,
+            // so page scrolling cannot skew it.
+            const offset = hit.offsetTop - 12;
             if (offset <= 0 || Math.abs(offset - scroller.scrollTop) < 1) return;
             scrollPreviewBy(offset - scroller.scrollTop, false, false);
           }, [previewNodes, previewVisible]);
@@ -1746,7 +1823,9 @@ window.__ModuleLoader__.load({
               setPreviewText(null);
               return;
             }
-            const reply = readReply(refreshableSessions(), sessionRef.current, item.seq);
+            // The row's own text doubles as the key, so a snapshot rebuilt
+            // between listing and previewing still finds the prompt.
+            const reply = readReply(refreshableSessions(), sessionRef.current, item.seq, item);
             const next = reply === null || reply.text === '' ? null : reply.text;
             const anchor = next === null ? null : matchAnchor(next, queryText.trim().toLowerCase());
             setPreviewAnchor(anchor);

@@ -78,7 +78,7 @@
 
 插件在输入框的 `conversation.input.overlay` 槽注册一个条目。该条目在输入框卡片上挂一个捕获阶段的键盘监听，因此能在 Lexical 之前拿到按键；它通过输入框自己的 `inputActions.setDraft()` 写入草稿，而不是直接操作编辑器 DOM。
 
-历史来自 `sessions.binding(sessionId).eventSource` 中 `source.kind === 'user'` 的 `user/message` 事件，按顺序读取；「历史条数上限」在折叠连续重复之后截取最新的 N 条。回答预览从该消息向后找到下一条人类消息，收集其中的 `assistant/message` 文本块。很长的提示词保留末尾 400 字符；如果第一个搜索命中出现在更早的位置，窗口会向前扩展到 6000 字符并标记命中的段落，预览随即滚到那里——这样选中的列表行就能展示「为什么它匹配」。
+历史和回答预览读的是同一份扫描结果：人类消息是 `source.kind === 'user'` 的 `user/message`，助手消息是任何带 `data.message.content` 文本的事件，其余事件（编辑、替换、工具调用）原地保留、不再遮挡邻居；「历史条数上限」在折叠连续重复之后截取最新的 N 条。回答预览从选中的提示词向后走到下一条人类消息；提示词自身的文本同时作为匹配键，所以即使列表和预览之间事件窗口被重建，也能对上。很长的提示词保留末尾 400 字符；如果第一个搜索命中出现在更早的位置，窗口会向前扩展到 6000 字符并标记命中的段落，预览随即滚到那里——这样选中的列表行就能展示「为什么它匹配」。
 
 宿主侧提供设置路由 `GET` / `POST /api/prompt-peek.settings`（读取、保存补丁、或 `{ "reset": true }`），注册在 Connection 共享的 `/api` 处理器上，因此与其他插件路由一样带 cookie、Host/Origin 和 Peer 校验。Connection 声明在可选的子 fiber 里，没有它的 profile 也能正常加载插件。设置页打开时读取一次；页面本身注册在 `settings.section` 与 `settings.section.icon` 槽，自带侧栏名称和地球图标。
 
