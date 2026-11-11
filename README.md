@@ -35,7 +35,7 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 | `↑` / `↓` | Select a match. |
 | `Space` | Toggle the Markdown preview of the reply to the selected prompt. |
 | `Shift+Space` | Type a literal space in the search query. |
-| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 180 px); hold to keep scrolling, release to stop. |
+| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 270 px, about fifteen lines); hold to keep scrolling, release to stop. |
 | Mouse wheel | While the preview is open, the wheel over the search box scrolls the reply a quarter page per notch. |
 | `Enter` | Put the selected prompt into the composer. |
 | `Esc` | Close search. |
@@ -51,7 +51,7 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 | Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. |
 | Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
-| Page distance | 180 px | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. |
+| Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. |
 | History limit | 300 | How many of the session's most recent prompts recall and search read. |
 | Result order | Newest first | `Oldest first` lists matches like a rendered listbox (ARIA pops the listbox upward, so keeping the selected prompt next to the composer is `Newest first`, the shell order). |
 

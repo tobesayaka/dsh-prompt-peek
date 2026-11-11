@@ -39,8 +39,11 @@ const DEFAULTS = Object.freeze({
   showPreview: true,
   /** Glide the preview between pages instead of jumping. */
   smoothScroll: true,
-  /** Pixels one PgUp / PgDn moves the reply preview; a wheel notch moves a quarter. */
-  previewPageSize: 180,
+  /**
+   * Pixels one PgUp / PgDn moves the reply preview; a wheel notch moves a
+   * quarter. The default is fifteen preview lines (15 x 18px).
+   */
+  previewPageSize: 270,
   /** Most recent prompts read from the session for recall. */
   historyLimit: 300,
   /** List search results oldest first (ARIA listbox order) or newest first. */

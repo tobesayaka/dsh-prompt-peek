@@ -15,7 +15,7 @@ const DEFAULTS = {
   locale: 'auto',
   showPreview: true,
   smoothScroll: true,
-  previewPageSize: 180,
+  previewPageSize: 270,
   historyLimit: 300,
   browseOrder: 'newest',
 };

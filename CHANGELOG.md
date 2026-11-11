@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.3 - 2026-11-11
+
+### Fixed
+
+- `PgUp` and `PgDn` could move different distances from the same position.
+  The glide used a sub-pixel step that the browser rounded to the same
+  `scrollTop`, so it marked itself finished while the last pixel was still
+  pending; the next press whichever direction started from that half-finished
+  position. The glide now applies whole pixels in its travel's sign and only
+  finishes once the target is actually reached.
+
+### Changed
+
+- The default page distance is **270 px**, about fifteen preview lines
+  (the setting still stores pixels: 60–1200).
+
 ## 0.3.2 - 2026-11-11
 
 ### Fixed

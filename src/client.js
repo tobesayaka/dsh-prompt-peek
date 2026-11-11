@@ -36,8 +36,11 @@ window.__ModuleLoader__.load({
     const MAX_RESULTS = 50;
     const MAX_REPLY = 6000;
     const REPLY_TAIL = 400;
-    const PREVIEW_PAGE = 180;
-    /** Bounds of the "lines per page" setting: pixels one PgUp / PgDn moves. */
+    /** Line height of the preview's Markdown body; page distances are quoted in these lines. */
+    const PREVIEW_LINE_HEIGHT = 18;
+    /** Default page: about fifteen preview lines (270px at an 18px line height). */
+    const PREVIEW_PAGE = 15 * PREVIEW_LINE_HEIGHT;
+    /** Bounds of the "page distance" setting, in pixels: roughly 3 to 66 lines. */
     const PAGE_RANGE = [60, 1200];
     const PREVIEW_SCROLL_TAU = 100;
     const EMPTY = [];
@@ -1871,10 +1874,6 @@ window.__ModuleLoader__.load({
               scroller.scrollTop = target;
               return;
             }
-            if (Math.abs(target - scroller.scrollTop) < 1) {
-              scroller.scrollTop = target;
-              return;
-            }
             const reduced = typeof window !== 'undefined'
               && typeof window.matchMedia === 'function'
               && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1901,9 +1900,22 @@ window.__ModuleLoader__.load({
                 animation.frame = 0;
                 return;
               }
+              // scrollTop is applied in whole pixels by most engines; rounding a
+              // sub-pixel step either way leaves the same value and would make
+              // the next press start from a half-finished position. Count the
+              // applied pixels (in the travel's sign) instead of the raw delta,
+              // and keep the last pixel of a step for the following frame rather
+              // than snapping it early.
               const advance = Math.max(1, remaining * (1 - Math.exp(-elapsed / PREVIEW_SCROLL_TAU)));
-              // Browsers round scrollTop, so a sub-pixel final step could otherwise stall.
-              el.scrollTop += remaining > 0 ? advance : -advance;
+              const applied = remaining > 0 ? Math.floor(advance) : Math.ceil(advance);
+              if (Math.abs(applied) >= 1) {
+                el.scrollTop += applied;
+                if (Math.abs(remaining) - Math.abs(applied) < 1) {
+                  el.scrollTop = animation.target;
+                  animation.frame = 0;
+                  return;
+                }
+              }
               animation.frame = requestAnimationFrame(step);
             };
             animation.frame = requestAnimationFrame(step);
