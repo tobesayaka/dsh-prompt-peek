@@ -95,6 +95,8 @@ dsh-prompt-peek/
 │   └── client.js
 ├── test/
 │   └── settings.test.mjs
+├── docs/
+│   └── REGRESSIONS.md
 ├── locale/
 │   ├── en.json
 │   └── zh.json
@@ -117,9 +119,10 @@ dsh-prompt-peek/
 2. 修改 `src/client.js`。
 3. 重新加载客户端模块：在 Plugins 页面禁用再启用该 bundle（推荐 HMR），或在宿主无法重新组合时刷新页面 / 重启 DSH。
 
-- `npm test` 运行宿主侧设置测试（`test/settings.test.mjs`，基于 `node:test`）：校验、落盘、重置、坏文件回退。测试使用临时 `DSH_HOME`，不碰真实数据。
+- `npm test` 运行宿主侧设置测试（`test/settings.test.mjs`，基于 `node:test`）：校验、落盘、重置、坏文件回退。测试使用临时 `DSH_HOME`，不碰真实数据。同时运行 `test/client.test.mjs`：用 `vm` 在无浏览器环境加载客户端工厂，检查它导出的纯函数——语言解析、按键决策、以及逐帧模拟预览翻页。
 - `npm run check` 对两个入口执行 `node --check`。
-- 客户端部分没有测试运行器：可以用 `React.createElement` stub 渲染，或按上面的步骤在浏览器里验证。客户端改动需要刷新页面或禁用再启用 bundle；宿主改动需要重启 DSH。
+- 客户端改动需要刷新页面或禁用再启用 bundle；宿主改动需要重启 DSH。
+- 修改 `glideStep`、`glideFrame`、`pagePlan` 或 `translateKey` 之前，先读 [docs/REGRESSIONS.md](docs/REGRESSIONS.md)，并按里面的方法做反向验证：把旧代码放回去，确认对应测试会失败。
 
 ## 已知限制
 
@@ -129,6 +132,11 @@ dsh-prompt-peek/
 - `Ctrl+R`/`Cmd+R` 只在输入框获得焦点时拦截；在页面其他地方浏览器仍会正常刷新。
 - 插件语言覆盖插件自己的界面（搜索面板、历史胶囊、设置页这些组件内的文案）；设置页外层的 DSH 页面标题、侧栏骨架由宿主按 DSH 语言显示。
 - 设置页每次打开时读取一次设置文件；直接手改文件后，需要重新打开设置页或重启插件才会反映。
+
+## 踩过的坑
+
+[docs/REGRESSIONS.md](docs/REGRESSIONS.md) 记录本插件发布过又修掉的问题：语言为什么没跟随 DSH、`PgUp` / `PgDn`
+为什么按了没反应、以及让 `PgUp` 一直向下滚的逐帧符号 bug。每条都写明对应的回归测试，防止再犯。
 
 ## 更新日志
 

@@ -46,6 +46,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `docs/REGRESSIONS.md`: an archive of the bugs this release fixed (language
+  follow, `PgUp` / `PgDn` doing nothing, the inverted glide step), with the
+  commit each one entered, the reverse check that proves its tests fail on the
+  old code, and the lesson that prevents a repeat.
 - `test/client.test.mjs`: the client's translation, key-routing, and glide
   decision tables run without a browser, including a frame-by-frame simulation
   of a `PgUp` pressed while a `PgDn` glide is still in flight, and of the

@@ -97,6 +97,8 @@ dsh-prompt-peek/
 │   └── client.js
 ├── test/
 │   └── settings.test.mjs
+├── docs/
+│   └── REGRESSIONS.md
 ├── locale/
 │   ├── en.json
 │   └── zh.json
@@ -119,9 +121,10 @@ dsh-prompt-peek/
 2. Edit `src/client.js`.
 3. Reload the client module: disable and re-enable the bundle in the Plugins page (HMR recommends it), or reload the page / restart DSH when the host cannot recompose.
 
-- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one.
+- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one. It also runs `test/client.test.mjs`, which loads the client factory in a `vm` sandbox (no browser) and checks the pure helpers it returns: language resolution, key routing, and a frame-by-frame simulation of the preview glide.
 - `npm run check` runs `node --check` over both entry points.
-- The client half has no runner: render it with a `React.createElement` stub, or verify in the browser as described above. Client changes need a page reload or a disable/enable of the bundle; Host changes need a DSH restart.
+- Client changes need a page reload or a disable/enable of the bundle; Host changes need a DSH restart.
+- Before changing `glideStep`, `glideFrame`, `pagePlan`, or `translateKey`, read [docs/REGRESSIONS.md](docs/REGRESSIONS.md) and run its reverse checks: put the old code back and watch the named tests fail.
 
 ## Known limitations
 
@@ -131,6 +134,12 @@ dsh-prompt-peek/
 - `Ctrl+R`/`Cmd+R` are only intercepted while the composer has keyboard focus; the browser reloads normally everywhere else.
 - The plugin's language covers the plugin's own surfaces (search panel, history pill, Settings page). DSH's slot chrome around the Settings tab is labelled by the host, which follows the DSH language.
 - The Settings page reads the saved file when it opens. A change made by editing the file directly is picked up after the page is reopened or the plugin is restarted.
+
+## Known regressions
+
+[docs/REGRESSIONS.md](docs/REGRESSIONS.md) records the bugs this plugin has shipped and fixed — how the
+language follow broke, why `PgUp` / `PgDn` appeared to do nothing, and the per-frame sign bug that made
+`PgUp` scroll downward forever. Each entry names the test that keeps it from coming back.
 
 ## Changelog
 
