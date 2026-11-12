@@ -42,6 +42,7 @@ const {
   readHistory,
   CSS,
   panelHeight: panelHeightOf,
+  previewHeight: previewHeightOf,
 } = loadClient();
 
 /** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
@@ -57,6 +58,7 @@ const filterHistory = (items, query, options) => filterHistoryOf(items, query, o
 /** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
 const pagePlan = (...args) => ({ ...pagePlanOf(...args) });
 const panelHeight = (...args) => ({ ...panelHeightOf(...args) });
+const previewHeight = (...args) => previewHeightOf(...args);
 
 /** A locale service like the host's `LocaleRuntime`, minus the browser plumbing. */
 function localeService(initial = 'zh', dictionaries = {}) {
@@ -668,6 +670,36 @@ test('the panel glides between replies as a pixel height (R9)', () => {
  * panel whenever a short reply follows a long one; a share of the panel does
  * not move as the reply does.
  */
+/**
+ * R9, the preview half: both boxes glide on the same clock.
+ *
+ * The preview used to be capped by `max-height: 40%`, a share re-resolved
+ * against the panel on every frame of the panel's glide: the box took most of
+ * its new size on the first frame and then crawled, so it moved without moving
+ * *with* the panel. It is pinned as a number now, capped by the same share, and
+ * glides on a transition of its own.
+ */
+test('the reply preview glides with the panel instead of jumping ahead (R9)', () => {
+  // A short reply is shown whole; a long one stops at 40% of the panel.
+  assert.equal(previewHeight({ open: true, content: 90, panel: 557 }), 90);
+  assert.equal(previewHeight({ open: true, content: 900, panel: 557 }), Math.floor(0.4 * 557));
+  // Closed, or with no panel to take a share of: no pinned height.
+  assert.equal(previewHeight({ open: false, content: 90, panel: 557 }), null);
+  assert.equal(previewHeight({ open: true, content: 90, panel: 0 }), null);
+  // Never negative, even with no content.
+  assert.equal(previewHeight({ open: true, content: 0, panel: 500 }), 0);
+
+  // Both boxes carry the same transition, so one glide cannot outrun the other.
+  const rules = cssRules();
+  const panelT = css(rules, '.dsh-pp-panel', 'transition');
+  const previewT = css(rules, '.dsh-pp-preview', 'transition');
+  const timing = (value) => value.replace(/^height\s*/, '');
+  assert.match(previewT, /^height\b/, 'the preview must transition its height: ' + previewT);
+  assert.equal(timing(previewT), timing(panelT), 'panel and preview must share one curve');
+  // The share survives only as the fallback for the frame before measurement.
+  assert.match(css(rules, '.dsh-pp-preview', 'max-height'), /%/, 'the 40% share stays as the first-frame ceiling');
+});
+
 test('the preview ceiling does not change size with the reply (R9)', () => {
   const cap = css(cssRules(), '.dsh-pp-preview', 'max-height');
   assert.doesNotMatch(cap, /\d(px|rem|em|vh|vw)\b/, 'the preview ceiling must not be absolute: ' + cap);
@@ -730,16 +762,74 @@ test('an open reply preview never squeezes the prompt list to nothing (R8)', () 
  * Chrome 151, clearing the panel's `height` and writing it back in the same
  * task makes the browser treat the value as unchanged and cancels the glide;
  * measurement on an off-screen clone was the only form that kept it.
+ *
+ * The clone must also release the boxes it may be measuring: once the preview
+ * is pinned too, a clone that keeps its inline `height` and `max-height:40%`
+ * reports the panel's current height instead of the content's.
  */
 test('the panel height is measured on a clone, never by resizing the panel (R9)', () => {
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
-  const body = source.slice(source.indexOf('function naturalHeight'), source.indexOf('/**\n     * The panel\'s height as an explicit pixel value'));
-  assert.ok(body.includes('cloneNode'), 'naturalHeight measures a clone');
+  const body = source.slice(source.indexOf('function measurePanel'), source.indexOf("/**\n     * The panel's height as an explicit pixel value"));
+  assert.ok(body.includes('cloneNode'), 'measurePanel measures a clone');
   assert.ok(body.includes("height = 'auto'"), 'the clone is laid out at natural height');
+  assert.ok(body.includes("maxHeight = 'none'"), 'the clone releases the preview ceiling');
+  assert.ok(body.includes('.dsh-pp-preview'), 'the reply preview is measured too');
   assert.ok(body.includes('.remove()'), 'the clone leaves no node behind');
-  const effect = source.slice(source.indexOf('Drive the panel as a pixel height'), source.indexOf('Scroll the row that carries'));
-  assert.ok(effect.includes('naturalHeight(panel)'), 'the effect measures through naturalHeight');
+  const effect = source.slice(source.indexOf('Drive the panel **and** the reply preview'), source.indexOf('Scroll the row that carries'));
+  assert.ok(effect.includes('measurePanel(panel)'), 'the effect measures through measurePanel');
   assert.ok(!/panel\.style\.height = ''/.test(effect), 'the effect must not resize the panel to measure it');
+  assert.ok(!/panel\.style\.height = ''/.test(body), 'and neither may the measurement');
+});
+
+test('an open reply preview never squeezes the prompt list to nothing (R8)', () => {
+  const rules = cssRules();
+  const panel = (rule) => css(rules, '.dsh-pp-panel', rule);
+  const list = (rule) => css(rules, '.dsh-pp-list', rule);
+  const row = (rule) => css(rules, '.dsh-pp-row', rule);
+  const preview = (rule) => css(rules, '.dsh-pp-preview', rule);
+
+  // The list must keep its own floor…
+  const listFloor = list('min-height');
+  assert.notEqual(listFloor, '0', 'the list needs a min-height instead of min-height:0');
+  assert.match(listFloor, /px|em|rem/, 'the list floor must be an absolute length: ' + listFloor);
+  // …and the rows must not be squashed below their own line either.
+  // `flex: none` is `0 0 auto`; an explicit shrink factor is read on its own.
+  const rowFlex = row('flex');
+  const rowShrink = row('flex-shrink').startsWith('0') || rowFlex === 'none'
+    || (rowFlex.split(/\s+/).length > 1 && rowFlex.split(/\s+/)[1] === '0');
+  assert.ok(rowShrink, '.dsh-pp-row must not shrink: ' + (row('flex') || row('flex-shrink')));
+
+  // The preview's ceiling must leave that floor room: a percentage of the
+  // panel measured while the panel is at its cap cannot fit a floor too.
+  const previewCap = preview('max-height');
+  assert.match(previewCap, /%/, 'the preview cap should be a share of the panel');
+  const share = Number(previewCap.match(/([\d.]+)%/)[1]) / 100;
+  assert.ok(share < 0.5, 'the preview may take less than half the panel: ' + previewCap);
+
+  // The panel's own ceiling comes from the component now (`panelHeight`), so
+  // ask the rule rather than the stylesheet: on a 900px-tall window it is 720.
+  const windowPX = 900;
+  const capPX = panelHeight({ open: true, content: 100000, viewport: windowPX, reduced: false }).height;
+  assert.ok(capPX > 0 && capPX < 100000, 'the panel keeps a finite cap: ' + capPX);
+  const panelInner = capPX - 2 * parseFloat(css(rules, '.dsh-pp-panel', 'padding'));
+  const chrome = 3 * parseFloat(css(rules, '.dsh-pp-panel', 'gap'));
+  const rowHeight = parseFloat(css(rules, '.dsh-pp-row', 'height'));
+  const previewCapPX = Number(previewCap.match(/\(([\d.]+)%/)?.[1] ?? '46') / 100 * panelInner;
+  const boxes = column([
+    { name: 'head', content: 18 },
+    { name: 'search', content: 34 },
+    { name: 'list', content: rowHeight * 2, grow: true, shrink: list('min-height') !== '0', min: parseFloat(list('min-height')) },
+    { name: 'preview', content: 3000, max: previewCapPX },
+    { name: 'hint', content: 16 },
+  ], panelInner - chrome);
+
+  const listBox = boxes.find((box) => box.name === 'list');
+  const previewBox = boxes.find((box) => box.name === 'preview');
+  assert.ok(listBox.height >= 3 * rowHeight, 'the list keeps three rows while the preview is open: ' + listBox.height.toFixed(0) + 'px');
+  // The preview stays pageable: it is still cut off by its own scroller.
+  assert.ok(previewBox.height <= previewCapPX + 0.5, 'the preview keeps its scroll ceiling: ' + previewBox.height.toFixed(0) + 'px');
+  assert.ok(boxes.reduce((sum, box) => sum + box.height, 0) <= panelInner - chrome + 0.5,
+    'the open preview does not overflow the capped panel');
 });
 
 /**
