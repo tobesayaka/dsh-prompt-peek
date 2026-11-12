@@ -13,17 +13,15 @@ import { dirname, join } from 'node:path';
  * The plugin keeps its preferences in `<DSH_HOME>/prompt-peek/settings.json`
  * rather than the Host user settings document, because it may be installed from
  * a local checkout into several profiles while sharing one DSH home. Only the
- * plugin's own choices live there — UI language, preview panel, smooth paging,
- * page size, history length, the result order, and whether the query also
- * matches replies — never session text, prompts, or replies.
+ * plugin's own choices live there — preview panel, smooth paging, page size,
+ * history length, the result order, and whether the query also matches replies
+ * — never session text, prompts, or replies. The interface language is not
+ * one of them: DSH's locale service owns it for every plugin.
  *
  * The route is registered on Connection's shared `/api` handler, so it inherits
  * the browser cookie, Host/Origin checks, and Peer admission, like the other
  * plugin routes.
  */
-
-/** Accepted values of the plugin language preference. `auto` follows DSH's active locale. */
-export const LOCALE_VALUES = Object.freeze(['auto', 'zh', 'en']);
 
 /**
  * Accepted values of the history order. `oldest` lists results oldest first,
@@ -33,8 +31,6 @@ export const LOCALE_VALUES = Object.freeze(['auto', 'zh', 'en']);
 export const BROWSE_ORDER_VALUES = Object.freeze(['newest', 'oldest']);
 
 const DEFAULTS = Object.freeze({
-  /** `auto` follows DSH's active locale; `zh` / `en` pin the plugin's copy. */
-  locale: 'auto',
   /** Show the reply preview column inside the search panel. */
   showPreview: true,
   /** Let the search query match the reply text as well as the prompt. */
@@ -81,11 +77,6 @@ export function normalizeSettings(input, current) {
   for (const key of Object.keys(input)) {
     if (!SETTINGS_KEYS.has(key)) return { error: 'unknown_setting', field: key };
     const value = input[key];
-    if (key === 'locale') {
-      if (typeof value !== 'string' || !LOCALE_VALUES.includes(value)) return { error: 'invalid_setting', field: key };
-      values[key] = value;
-      continue;
-    }
     if (key === 'browseOrder') {
       if (typeof value !== 'string' || !BROWSE_ORDER_VALUES.includes(value)) return { error: 'invalid_setting', field: key };
       values[key] = value;

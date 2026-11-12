@@ -44,11 +44,10 @@ Press `↑` in the composer to get the last message you sent back. Keep pressing
 
 ## Settings
 
-The plugin has its own section in **Settings** — a sidebar row named **Prompt peek**, between *Shell* and *Built-in plugins* — so its preferences are a page of their own rather than a tab buried inside another section. Language is the first group and applies the moment you pick it; the behavior rows save together, because they are one policy.
+The plugin has its own section in **Settings** — a sidebar row named **Prompt peek**, between *Shell* and *Built-in plugins* — so its preferences are a page of their own rather than a tab buried inside another section. The behavior rows save together, because they are one policy. The page and the panel follow DSH's interface language (**Settings → General → Language**); the plugin has no language setting of its own.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. **Follow the DSH interface** takes the language from DSH's active locale live, including `zh-CN`-style tags, so the panel and this page switch whenever DSH's language does. |
 | Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
 | Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. Once the preview reaches either edge, `PgUp` / `PgDn` stop there instead of moving the selection. |
@@ -87,7 +86,7 @@ History and the reply preview read the same scan of `sessions.binding(sessionId)
 
 The Host half owns the settings route `GET` / `POST /api/prompt-peek.settings` (read, save a patch, or `{ "reset": true }`), registered on Connection's shared `/api` handler so it inherits the same cookie, Host/Origin, and Peer checks as every other plugin route. Connection is declared inside an optional child fiber, so a profile without it still loads the plugin. The client reads the route when the section opens; the section itself registers into the `settings.section` and `settings.section.icon` slots with its own nav label and globe icon.
 
-While the page is closed the plugin works from its documented defaults; values saved during the session apply to every open composer at once. A DSH language switch is followed only under **Follow the DSH interface** — a pinned language keeps the plugin's own copy.
+While the page is closed the plugin works from its documented defaults; values saved during the session apply to every open composer at once. A DSH language switch moves the panel and this page with it, without a reload.
 
 No build step and no dependencies: the whole client half is plain JavaScript in `src/client.js`, including the Markdown renderer and the preview scroll animation. It reaches the host only through the web shell's frozen platform module table — `react` for the UI and `@deepseek-ai/dsh-client-ui-primitives` for the shared `CodeBlock`; when a host does not expose that component, the preview falls back to a plain `<pre>` with a language label.
 

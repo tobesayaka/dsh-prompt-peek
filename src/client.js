@@ -45,19 +45,23 @@ window.__ModuleLoader__.load({
     /** Bounds of the "page distance" setting, in pixels: roughly 3 to 66 lines. */
     const PAGE_RANGE = [60, 1200];
     const PREVIEW_SCROLL_TAU = 100;
+    /** The panel's height cap, matching `.dsh-pp-panel`'s `max-height`. */
+    const PANEL_MAX = 720;
+    /** `80vh`, the other half of the panel's cap, as a share. */
+    const PANEL_MAX_VIEWPORT = 0.8;
     const EMPTY = [];
-    /** Language ids the plugin can show, alongside their endonym labels. */
-    const LANGUAGE_LABELS = {
-      auto: { en: 'Follow the DSH interface', zh: '跟随 DSH 界面语言' },
-      en: { en: 'English', zh: 'English' },
-      zh: { en: '中文', zh: '中文' },
-    };
+    /**
+     * DSH's locale service owns the language choice: the user picks it once in
+     * Settings → General → Language, and every plugin follows. The plugin has
+     * no language setting of its own — a second switch could only disagree
+     * with the rest of the window.
+     */
 
     /**
      * Copy for hosts whose locale service has no dictionary yet, or whose
-     * dictionary has not arrived. Also the reference key set for
-     * `strictDictionary`: the dictionary must stay a superset of the neutral
-     * baseline, so a host without the locale service still gets working copy.
+     * dictionary has not arrived. It is also the English entry registered with
+     * `ctx.locale.register`, so a host without the service still gets working
+     * copy instead of raw keys.
      */
     const BASE_DICTIONARY = {
       title: 'Search sent messages',
@@ -86,67 +90,21 @@ window.__ModuleLoader__.load({
       unwrapCode: 'Unwrap lines',
       browse: 'History',
       browseHint: '↑↓ browse · Esc exit',
+      /** Where the plugin's page lives; named in the panel when its preview is off. */
+      settingsLocation: 'Settings → Prompt peek',
     };
 
-    /** Copy for the plugin's Settings section (sidebar row, icon title, groups, rows, buttons). */
-    function settingsDictionary(language) {
-      const label = (id) => LANGUAGE_LABELS[id][language];
-      if (language === 'zh') {
-        return {
-          settingsNav: '输入框速览',
-          settingsTitle: '输入框速览',
-          settingsIntro: '↑ / ↓ 翻历史、Ctrl+R 搜索、空格 预览回答时使用的偏好。只影响本插件，不改动 DSH 其他界面。',
-          sectionLanguage: '语言',
-          localeLabel: '界面语言',
-          localeHint: '选择插件面板使用的语言，或让它跟随 DSH 的界面语言。',
-          localeAuto: label('auto'),
-          localeZh: label('zh'),
-          localeEn: label('en'),
-          sectionBehavior: '行为',
-          showPreviewLabel: '显示回答预览',
-          showPreviewHint: '在搜索面板中按空格预览该提示词得到的回答。',
-          searchAnswersLabel: '同时搜索回答',
-          searchAnswersHint: '搜索关键词时也匹配 dsh 的回答；列表仍显示你的提问，命中的行会标出「回答命中」。',
-          smoothScrollLabel: '平滑翻页',
-          smoothScrollHint: 'PgUp / PgDn 平滑滚动预览，而不是直接跳动。已为减少动态效果的系统强制关闭。',
-          previewPageSizeLabel: '每页滚动距离',
-          previewPageSizeValue: '{value} px',
-          previewPageSizeHint: 'PgUp / PgDn 一次滚动的距离（像素）；鼠标滚轮一格的滚动距离是这个值的四分之一。',
-          historyLimitLabel: '历史条数上限',
-          historyLimitValue: '{value} 条',
-          historyLimitHint: '最多读取当前会话最近发送的多少条提示词。',
-          browseOrderLabel: '结果顺序',
-          browseOrderHint: '搜索列表从旧到新（与 ↑ / ↓ 翻阅方向一致），或像 Shell 那样从新到旧。',
-          browseOrderOldest: '从旧到新',
-          browseOrderNewest: '从新到旧',
-          save: '保存',
-          saving: '保存中…',
-          reset: '恢复配置默认值',
-          saved: '已保存',
-          loadFailed: '无法读取设置。',
-          saveFailed: '保存失败。',
-          invalidValue: '{field}：请输入 {min} 到 {max} 之间的整数。',
-          readOnly: '当前 profile 不可编辑设置。',
-          fields: {
-            locale: '界面语言',
-            showPreview: '显示回答预览',
-            smoothScroll: '平滑翻页',
-            previewPageSize: '每页滚动距离',
-            historyLimit: '历史条数上限',
-            browseOrder: '结果顺序',
-          },
-        };
-      }
-      return {
+    /**
+     * Copy for the plugin's Settings section (sidebar row, icon title, groups,
+     * rows, buttons). Registered under `NS` itself, so the composer panel and
+     * this page read one namespace and one key set.
+     */
+    const SETTINGS_DICTIONARY = {
+      en: {
         settingsNav: 'Prompt peek',
+        settingsLocation: 'Settings → Prompt peek',
         settingsTitle: 'Prompt peek',
         settingsIntro: 'Preferences for ↑ / ↓ recall, Ctrl+R search, and the Space preview. They only change this plugin, not the rest of DSH.',
-        sectionLanguage: 'Language',
-        localeLabel: 'Interface language',
-        localeHint: 'Pick the language of the plugin panels, or follow the DSH interface language.',
-        localeAuto: label('auto'),
-        localeZh: label('zh'),
-        localeEn: label('en'),
         sectionBehavior: 'Behavior',
         showPreviewLabel: 'Show reply preview',
         showPreviewHint: 'Let Space reveal the reply that prompt received inside the search panel.',
@@ -172,140 +130,108 @@ window.__ModuleLoader__.load({
         saveFailed: 'Could not save the settings.',
         invalidValue: '{field}: enter a whole number between {min} and {max}.',
         readOnly: 'Settings are not editable in this profile.',
-        fields: {
-          locale: 'Interface language',
-          showPreview: 'Show reply preview',
-          smoothScroll: 'Smooth paging',
-          previewPageSize: 'Page distance',
-          historyLimit: 'History limit',
-          browseOrder: 'Result order',
-        },
-      };
-    }
+      },
+      zh: {
+        settingsNav: '输入框速览',
+        settingsLocation: '设置 → 输入框速览',
+        settingsTitle: '输入框速览',
+        settingsIntro: '↑ / ↓ 翻历史、Ctrl+R 搜索、空格 预览回答时使用的偏好。只影响本插件，不改动 DSH 其他界面。',
+        sectionBehavior: '行为',
+        showPreviewLabel: '显示回答预览',
+        showPreviewHint: '在搜索面板中按空格预览该提示词得到的回答。',
+        searchAnswersLabel: '同时搜索回答',
+        searchAnswersHint: '搜索关键词时也匹配 dsh 的回答；列表仍显示你的提问，命中的行会标出「回答命中」。',
+        smoothScrollLabel: '平滑翻页',
+        smoothScrollHint: 'PgUp / PgDn 平滑滚动预览，而不是直接跳动。已为减少动态效果的系统强制关闭。',
+        previewPageSizeLabel: '每页滚动距离',
+        previewPageSizeValue: '{value} px',
+        previewPageSizeHint: 'PgUp / PgDn 一次滚动的距离（像素）；鼠标滚轮一格的滚动距离是这个值的四分之一。',
+        historyLimitLabel: '历史条数上限',
+        historyLimitValue: '{value} 条',
+        historyLimitHint: '最多读取当前会话最近发送的多少条提示词。',
+        browseOrderLabel: '结果顺序',
+        browseOrderHint: '搜索列表从旧到新（与 ↑ / ↓ 翻阅方向一致），或像 Shell 那样从新到旧。',
+        browseOrderOldest: '从旧到新',
+        browseOrderNewest: '从新到旧',
+        save: '保存',
+        saving: '保存中…',
+        reset: '恢复配置默认值',
+        saved: '已保存',
+        loadFailed: '无法读取设置。',
+        saveFailed: '保存失败。',
+        invalidValue: '{field}：请输入 {min} 到 {max} 之间的整数。',
+        readOnly: '当前 profile 不可编辑设置。',
+      },
+    };
+
+    /** The composer panel's copy in Chinese, key for key with {@link BASE_DICTIONARY}. */
+    const PANEL_ZH = {
+      title: '搜索已发送的消息',
+      placeholder: '输入关键词…',
+      empty: '没有匹配的消息',
+      emptyShort: '无结果',
+      hintSelect: '选择',
+      hintPreview: '预览',
+      hintHidePreview: '收起',
+      hintTypeSpace: '输入空格',
+      hintPage: '翻页',
+      answerHit: '回答命中',
+      hintWheel: '滚动',
+      hintInsert: '填入',
+      hintClose: '取消',
+      keySpace: '空格',
+      previewTitle: 'dsh 的回答',
+      previewMissing: '这一条在已加载的记录里没有文字回复。',
+      previewOff: '回答预览已关闭',
+      loadingOlder: '正在加载更早的提示词…',
+      turnOn: '重新开启',
+      copyCode: '复制',
+      copiedCode: '已复制',
+      codeLabel: '代码',
+      wrapCode: '自动换行',
+      unwrapCode: '取消换行',
+      browse: '历史',
+      browseHint: '↑↓ 翻看 · Esc 退出',
+      settingsLocation: '设置 → 输入框速览',
+    };
+
+    /** One namespace for everything this plugin renders: the panel copy plus the Settings page. */
+    const DICTIONARY = {
+      en: { ...BASE_DICTIONARY, ...SETTINGS_DICTIONARY.en },
+      zh: { ...BASE_DICTIONARY, ...PANEL_ZH, ...SETTINGS_DICTIONARY.zh },
+    };
 
     /**
-     * The copy of the composer surfaces for one language: the neutral English
-     * baseline plus the zh overrides. Both tables are also registered with the
-     * DSH locale service, so `auto` and a pinned language read the same keys.
+     * Host fields that belong to a numeric row and its label.
      */
-    function composerDictionary(language) {
-      if (language !== 'zh') return BASE_DICTIONARY;
-      return {
-        ...BASE_DICTIONARY,
-        title: '搜索已发送的消息',
-        placeholder: '输入关键词…',
-        empty: '没有匹配的消息',
-        emptyShort: '无结果',
-        hintSelect: '选择',
-        hintPreview: '预览',
-        hintHidePreview: '收起',
-        hintTypeSpace: '输入空格',
-        hintPage: '翻页',
-        answerHit: '回答命中',
-        hintWheel: '滚动',
-        hintInsert: '填入',
-        hintClose: '取消',
-        keySpace: '空格',
-        previewTitle: 'dsh 的回答',
-        previewMissing: '这一条在已加载的记录里没有文字回复。',
-        previewOff: '回答预览已关闭',
-        loadingOlder: '正在加载更早的提示词…',
-        turnOn: '重新开启',
-        copyCode: '复制',
-        copiedCode: '已复制',
-        codeLabel: '代码',
-        wrapCode: '自动换行',
-        unwrapCode: '取消换行',
-        browse: '历史',
-        browseHint: '↑↓ 翻看 · Esc 退出',
-      };
-    }
+    const SETTING_LABEL_KEYS = {
+      previewPageSize: 'previewPageSizeLabel',
+      historyLimit: 'historyLimitLabel',
+    };
 
     /**
-     * Read the DSH locale service, or `null` when the caller has none (a plain
-     * browser test, an older shell). Looked up on every call: this plugin's
-     * client entry loads before the locale plugin finishes its async apply.
-     * @param {any} ctx
-     * @returns {any}
-     */
-    function localeFace(ctx) {
-      try {
-        const face = ctx === null || ctx === undefined || typeof ctx.get !== 'function' ? null : ctx.get('locale');
-        return face === undefined || face === null ? null : face;
-      } catch (error) {
-        return null;
-      }
-    }
-
-    /** `zh` / `en` for a pinned preference, or for DSH's active locale under `auto`. */
-    function effectiveLanguage(ctx, preference) {
-      if (preference === 'zh' || preference === 'en') return preference;
-      try {
-        const face = localeFace(ctx);
-        const snapshot = face === null || typeof face.getSnapshot !== 'function' ? null : face.getSnapshot();
-        const active = snapshot === null || snapshot === undefined ? '' : String(snapshot.active);
-        return active.toLowerCase().startsWith('zh') ? 'zh' : 'en';
-      } catch (error) {
-        return 'en';
-      }
-    }
-
-    /**
-     * One key's text, resolved without touching the DOM or the ctx.
+     * Copy for the plugin's own surfaces.
      *
-     * `lookup` is what the host's locale dictionary answers for a key (`NS` or
-     * `NS.settings`); an empty string means "not translated here". A pinned
-     * language reads the built-in table only; `auto` prefers a host translation
-     * and falls back to `fallback` — the table for the language DSH is running
-     * in, which the caller resolves from the live locale. Both paths share the
-     * same key set, so a missing host registration never turns the panel
-     * English on a Chinese interface.
-     * @param {'auto' | 'zh' | 'en'} preference
-     * @param {string} key
-     * @param {(key: string) => string} lookup
-     * @param {Record<string, string> | null} [fallback]
-     * @returns {string}
+     * `bind` is the locale service's translate function for {@link NS}: it reads
+     * DSH's active locale on every call, so a language switch reaches the
+     * plugin without a remount. `translate` adds `{name}` interpolation for the
+     * two rows that quote a number.
+     * @param {(key: string) => string} bind
      */
-    function translateKey(preference, key, lookup, fallback) {
-      const language = preference === 'zh' ? 'zh' : (preference === 'en' ? 'en' : null);
-      const table = composerDictionary(language === 'zh' ? 'zh' : 'en');
-      if (language !== null) return table[key] ?? key;
-      const own = fallback === null || fallback === undefined ? table : fallback;
+    function translateKey(bind, key, params) {
       let text = '';
       try {
-        text = String(lookup(key) ?? '');
+        text = String(bind(key) ?? key);
       } catch (error) {
         text = '';
       }
-      // `t(key)` echoes the key itself when the namespace has no entry, and the
-      // settings namespace answers `NS.key`-style keys; neither is copy.
-      if (text !== '' && text !== key && text !== NS + '.' + key && text !== SETTINGS_NS + '.' + key) return text;
-      return own[key] ?? table[key] ?? key;
+      // `bind` echoes the key when the namespace has no entry, and the setup
+      // namespace answers `NS.key`-style keys; neither is copy.
+      if (text === '' || text === key || text === NS + '.' + key) text = DICTIONARY.en[key] ?? key;
+      if (params === undefined) return text;
+      return text.replace(/\{(\w+)\}/g, (match, name) => name in params ? String(params[name]) : match);
     }
 
-    /**
-     * The copy for the plugin's own surfaces.
-     *
-     * `preference` is the user's language setting (`auto`, `zh`, `en`): a pinned
-     * language ignores DSH's active locale, so the page can run in English while
-     * the search panel is Chinese. Under `auto` the language is DSH's active
-     * locale, read live on each call, so switching DSH's language moves the
-     * panel with it.
-     */
-    function makeTranslate(ctx, preference, extra) {
-      const own = composerDictionary(effectiveLanguage(ctx, preference));
-      const table = extra === null || extra === undefined ? own : { ...own, ...extra };
-      return (key) => {
-        if (preference === 'zh' || preference === 'en') return table[key] ?? key;
-        // `auto` resolves the language on every call, so a DSH language switch
-        // reaches the panel even before the overlay re-renders.
-        const fallback = composerDictionary(effectiveLanguage(ctx, 'auto'));
-        const face = localeFace(ctx);
-        if (face === null || typeof face.bind !== 'function') return fallback[key] ?? table[key] ?? key;
-        const t = face.bind(NS);
-        return translateKey('auto', key, (k) => t(k), fallback);
-      };
-    }
 
     const ROOT_STYLE = {
       position: 'absolute',
@@ -321,7 +247,7 @@ window.__ModuleLoader__.load({
     };
 
     const CSS = `
-.dsh-pp-panel{pointer-events:auto;display:flex;flex-direction:column;gap:7px;padding:10px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;max-height:min(70vh,620px);overflow:hidden}
+.dsh-pp-panel{pointer-events:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:7px;padding:10px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;overflow:hidden;transition:height 140ms ease}
 .dsh-pp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px}
 .dsh-pp-title{color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;font-weight:500}
 .dsh-pp-count{flex:none;border-radius:999px;padding:1px 8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;font-variant-numeric:tabular-nums}
@@ -330,22 +256,23 @@ window.__ModuleLoader__.load({
 .dsh-pp-query{box-sizing:border-box;width:100%;height:34px;padding:0 10px 0 30px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;outline:none}
 .dsh-pp-query::placeholder{color:var(--dsw-alias-label-secondary)}
 .dsh-pp-query:focus{border-color:var(--dsw-alias-brand-primary)}
-.dsh-pp-list{position:relative;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:1px 0}
-.dsh-pp-row{display:block;box-sizing:border-box;width:100%;text-align:left;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;padding:5px 9px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.dsh-pp-list{position:relative;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;min-height:calc(3 * 30px + 2px);overflow-y:auto;overscroll-behavior:contain;padding:1px 0}
+.dsh-pp-row{flex:none;display:block;box-sizing:border-box;width:100%;height:30px;text-align:left;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;padding:5px 9px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .dsh-pp-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-pp-row[data-active="true"]{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,var(--dsw-alias-bg-layer-2))}
 .dsh-pp-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
 .dsh-pp-row__hit{margin-left:8px;padding:0 6px;border-radius:5px;font-size:11px;line-height:18px;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}
 .dsh-pp-mark{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .dsh-pp-empty{padding:12px 8px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-pp-preview{flex:0 1 auto;min-height:0;max-height:min(46vh,320px);overflow-y:auto;overscroll-behavior:contain;border-top:0.5px solid var(--dsw-alias-border-l1);margin-top:1px;padding:8px 4px 2px 2px}
-.dsh-pp-preview__title{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;letter-spacing:.02em;margin-bottom:5px}
+.dsh-pp-preview{flex:0 1 auto;min-height:0;max-height:40%;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:contain;margin-top:1px;padding:0 0 2px}
+.dsh-pp-preview__title{flex:none;display:flex;align-items:center;gap:6px;box-sizing:border-box;width:calc(100% + 20px);margin:0 0 0 -10px;padding:6px 10px;border-bottom:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;letter-spacing:.02em}
 .dsh-pp-preview__title::before{content:"";width:5px;height:5px;border-radius:999px;background:var(--dsw-alias-brand-primary);opacity:.8}
-.dsh-pp-preview__body{font-size:12px;line-height:18px}
-.dsh-pp-preview__empty{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.dsh-pp-preview__body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:6px 4px 0 2px;font-size:12px;line-height:18px}
+.dsh-pp-preview__empty{flex:0 0 auto;overflow:hidden;padding:6px 4px 0 2px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dsh-pp-hint{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 2px 0;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
 .dsh-pp-hint__group{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
 .dsh-pp-hint__where{margin-left:auto;white-space:nowrap;border:0;padding:0;margin-top:0;margin-bottom:0;margin-right:0;background:none;color:var(--dsw-alias-brand-primary);font:inherit;font-size:11px;line-height:16px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+@media (prefers-reduced-motion:reduce){.dsh-pp-panel{transition:none}}
 .dsh-pp-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10px;line-height:1;font-family:inherit}
 .dsh-pp-md{font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary)}
 .dsh-pp-md__p{margin:0 0 6px;white-space:pre-wrap;word-break:break-word}
@@ -637,6 +564,54 @@ window.__ModuleLoader__.load({
       if (!previewVisible) return { action: 'open', delta };
       if (atEdge) return { action: 'edge', delta };
       return { action: 'scroll', delta };
+    }
+
+    /**
+     * The height a box would take with `height:auto`, measured on an off-screen
+     * clone so the box itself is never touched. Writing to the real element's
+     * height (even to the same value) would cancel a transition already
+     * planned for it, which is exactly what this measurement serves.
+     *
+     * @param {HTMLElement} element
+     * @returns {number} content height in pixels, 0 when it cannot be measured
+     */
+    function naturalHeight(element) {
+      if (element === null || element === undefined || typeof element.cloneNode !== 'function') return 0;
+      const width = element.getBoundingClientRect().width;
+      if (!(width > 0)) return 0;
+      const clone = element.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.style.position = 'absolute';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.width = width + 'px';
+      clone.style.height = 'auto';
+      clone.style.transition = 'none';
+      element.parentNode === null ? document.body.appendChild(clone) : element.parentNode.appendChild(clone);
+      const height = clone.getBoundingClientRect().height;
+      clone.remove();
+      return Math.ceil(height);
+    }
+
+    /**
+     * The panel's height as an explicit pixel value, or `null` for the
+     * stylesheet's `auto`.
+     *
+     * A content-sized `height: auto` never animates when the content changes
+     * (Chrome reports no running transition for a reply swap inside `auto`,
+     * even with `interpolate-size: allow-keywords`). Writing the measured
+     * height as a number instead makes every swap a `Npx → Mpx` change, which
+     * the panel's `transition: height` does glide. The stylesheet keeps the
+     * same ceiling, applied here because a number would otherwise ignore it.
+     *
+     * @param {{ open: boolean, content: number, viewport: number, reduced: boolean }} state
+     * @returns {{ height: number | null, animate: boolean }}
+     */
+    function panelHeight({ open, content, viewport, reduced }) {
+      if (!open || !(content > 0)) return { height: null, animate: false };
+      const byViewport = viewport > 0 ? PANEL_MAX_VIEWPORT * viewport : PANEL_MAX;
+      const ceiling = Math.min(byViewport, PANEL_MAX);
+      return { height: Math.min(Math.ceil(content), ceiling), animate: reduced !== true };
     }
 
     /**
@@ -1151,38 +1126,11 @@ window.__ModuleLoader__.load({
     /** Id of this plugin's Settings section and sidebar row. */
     const SETTING_TAB_ID = 'prompt-peek';
 
-    /**
-     * The Settings sidebar row's label. The slot table calls it outside any
-     * render, so it resolves the language live: the pinned preference when the
-     * user set one, DSH's active locale under `auto`.
-     */
-    function translateSettingsKey(ctx, language, key) {
-      const dictionary = settingsDictionary(language === 'zh' ? 'zh' : 'en');
-      const value = dictionary[key];
-      return typeof value === 'string' ? value : key;
-    }
-
-    /**
-     * Where the plugin's own page lives, named in the footer of the search panel
-     * when its preview is off. Opening Settings from script would depend on a
-     * shell API the plugin does not own.
-     */
-    function settingsLocation(ctx) {
-      return (effectiveLanguage(ctx, 'auto') === 'zh' ? '设置 → ' : 'Settings → ')
-        + translateSettingsKey(ctx, effectiveLanguage(ctx, 'auto'), 'settingsNav');
-    }
-
     /** Numeric bounds the Settings page enforces before it saves, mirroring the host. */
     const SETTING_LIMITS = {
       previewPageSize: PAGE_RANGE,
       historyLimit: [20, 1000],
     };
-    /** Host fields that belong to a numeric row and its label. */
-    const SETTING_LABEL_KEYS = {
-      previewPageSize: 'previewPageSizeLabel',
-      historyLimit: 'historyLimitLabel',
-    };
-
     /** The globe used by the sidebar's and the nav row's language control. */
     function GlobeIcon(props) {
       const size = props !== null && props !== undefined && typeof props.size === 'number' ? props.size : 16;
@@ -1250,7 +1198,7 @@ window.__ModuleLoader__.load({
      * soon as it is chosen; the behavior switches and their numbers are saved
      * together, because they are one policy.
      */
-    function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
+    function createSettingsPage(ctx, store, bind, useSettings, useLocaleRevision) {
       const PAGE = {
         display: 'flex',
         flexDirection: 'column',
@@ -1279,21 +1227,6 @@ window.__ModuleLoader__.load({
         textTransform: 'uppercase',
         color: 'var(--dsw-alias-label-secondary)',
         padding: '18px 0 2px',
-      };
-      const PILL = {
-        boxSizing: 'border-box',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        height: 32,
-        padding: '0 10px 0 12px',
-        borderRadius: 8,
-        border: '0.5px solid var(--dsw-alias-border-l1)',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        color: 'var(--dsw-alias-label-primary)',
-        font: 'inherit',
-        fontSize: 13,
-        cursor: 'pointer',
       };
       const SELECT = {
         boxSizing: 'border-box',
@@ -1336,7 +1269,6 @@ window.__ModuleLoader__.load({
       const STATUS = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)' };
       const ERROR = { ...STATUS, color: 'var(--dsw-alias-state-error-primary, var(--dsw-alias-label-primary))' };
       const DEFAULTS = {
-        locale: 'auto',
         showPreview: true,
         searchAnswers: false,
         smoothScroll: true,
@@ -1344,32 +1276,18 @@ window.__ModuleLoader__.load({
         historyLimit: 300,
         browseOrder: 'newest',
       };
-      const labelOf = (language, languageId) => {
-        if (languageId === 'auto') return settingsDictionary(language).localeAuto;
-        return LANGUAGE_LABELS[languageId][language === 'zh' ? 'zh' : 'en'];
-      };
 
       return function PromptPeekSettings() {
         useSettings();
         useLocaleRevision();
         const state = store.get();
-        // The form's own copy follows what it is editing, so choosing a language
-        // switches the page immediately, before (and whether or not) it is saved.
+        // The page's copy comes from the locale service on every render, so the
+        // DSH language reaches it live; `draft` only holds unsaved edits.
         const draft = React.useState(null);
-        const preference = draft[0] !== null && draft[0] !== undefined && (draft[0].locale === 'zh' || draft[0].locale === 'en')
-          ? draft[0].locale
-          : state.language;
-        const language = effectiveLanguage(ctx, preference);
-        const t = (key) => {
-          const dictionary = settingsDictionary(language);
-          const value = dictionary[key] ?? settingsDictionary('en')[key];
-          return typeof value === 'string' ? value : key;
-        };
+        const t = (key) => translateKey(bind, key);
         const label = (key) => {
           const field = SETTING_LABEL_KEYS[key];
-          if (field === undefined) return key;
-          const dictionary = settingsDictionary(language);
-          return dictionary.fields[field] ?? settingsDictionary('en').fields[field] ?? key;
+          return field === undefined ? key : t(field);
         };
         // `values` re-reads the store whenever its revision moves (a save, the
         // first load, or a DSH language switch); `draft` holds unsaved edits.
@@ -1381,7 +1299,6 @@ window.__ModuleLoader__.load({
         const [notice, setNotice] = React.useState('');
         const [editable, setEditable] = React.useState(true);
         const [path, setPath] = React.useState('');
-        const [menuOpen, setMenuOpen] = React.useState(false);
 
         React.useEffect(() => {
           const controller = new AbortController();
@@ -1451,13 +1368,6 @@ window.__ModuleLoader__.load({
           }
         };
 
-        /** The language applies on choice; nothing else waits for it. */
-        const chooseLanguage = (value) => {
-          update('locale', value);
-          const next = { ...baseline, locale: value };
-          void post({ values: { ...settingsPatch(next), locale: value } }, () => setNotice(''));
-        };
-
         const settingsPatch = (source) => {
           const patch = {};
           for (const key of Object.keys(SETTING_LIMITS)) {
@@ -1483,8 +1393,7 @@ window.__ModuleLoader__.load({
               return;
             }
           }
-          const locale = baseline.locale === 'zh' || baseline.locale === 'en' ? baseline.locale : 'auto';
-          void post({ values: { ...settingsPatch(baseline), locale } });
+          void post({ values: settingsPatch(baseline) });
         };
 
         const reset = () => {
@@ -1547,79 +1456,6 @@ window.__ModuleLoader__.load({
           rows,
         );
 
-        /** A menu, not a `<select>`: picking a language re-renders the page in it at once. */
-        const languageRow = () => {
-          const currentLanguage = baseline.locale === 'zh' || baseline.locale === 'en' ? baseline.locale : 'auto';
-          const options = ['auto', 'zh', 'en'];
-          return h('div', { style: ROW },
-            h('div', { style: STACK },
-              h('div', { style: TITLE }, t('localeLabel')),
-              h('div', { style: DESC }, t('localeHint')),
-            ),
-            h('div', { style: { position: 'relative', flex: 'none' } },
-              h('button', {
-                type: 'button',
-                'aria-haspopup': 'menu',
-                'aria-expanded': menuOpen,
-                'aria-label': t('localeLabel'),
-                disabled,
-                onClick: () => setMenuOpen((open) => !open),
-                style: disabled ? { ...PILL, opacity: 0.6, cursor: 'default' } : PILL,
-              },
-                h('span', { 'aria-hidden': true, style: { display: 'inline-flex' } }, h(GlobeIcon, { size: 14 })),
-                h('span', null, labelOf(language, currentLanguage)),
-                h('span', { 'aria-hidden': true, style: { opacity: 0.6 } }, '⌄'),
-              ),
-              menuOpen ? h('div', {
-                role: 'menu',
-                'aria-label': t('localeLabel'),
-                onMouseLeave: () => setMenuOpen(false),
-                style: {
-                  position: 'absolute',
-                  top: 'calc(100% + 4px)',
-                  right: 0,
-                  zIndex: 20,
-                  minWidth: 200,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  padding: 4,
-                  borderRadius: 10,
-                  border: '0.5px solid var(--dsw-alias-border-l1)',
-                  background: 'var(--dsw-alias-bg-overlay)',
-                  boxShadow: 'var(--dsw-elevation-prominent)',
-                },
-              }, options.map((id) => h('button', {
-                key: id,
-                type: 'button',
-                role: 'menuitemradio',
-                'aria-checked': currentLanguage === id,
-                onClick: () => {
-                  setMenuOpen(false);
-                  if (id !== currentLanguage || current === null) chooseLanguage(id);
-                },
-                style: {
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '7px 10px',
-                  border: 'none',
-                  borderRadius: 7,
-                  background: currentLanguage === id ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
-                  color: 'var(--dsw-alias-label-primary)',
-                  font: 'inherit',
-                  fontSize: 13,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                },
-              },
-                h('span', null, labelOf(language, id)),
-                currentLanguage === id ? h('span', { 'aria-hidden': true }, '✓') : null,
-              ))) : null,
-            ),
-          );
-        };
-
         if (current === null && error !== '') {
           return h('div', { style: { padding: '18px 0', ...PAGE } },
             h('div', { style: { ...TITLE, fontSize: 16, fontWeight: 600 } }, t('settingsTitle')),
@@ -1632,7 +1468,6 @@ window.__ModuleLoader__.load({
             h('div', { style: { fontSize: 16, lineHeight: '24px', fontWeight: 600 } }, t('settingsTitle')),
             h('div', { style: DESC }, t('settingsIntro')),
           ),
-          group(t('sectionLanguage'), [languageRow()]),
           group(t('sectionBehavior'), [
             switchRow(t('showPreviewLabel'), t('showPreviewHint'), baseline.showPreview !== false, (value) => update('showPreview', value)),
             switchRow(t('searchAnswersLabel'), t('searchAnswersHint'), baseline.searchAnswers === true, (value) => update('searchAnswers', value)),
@@ -1680,13 +1515,9 @@ window.__ModuleLoader__.load({
        * `document`, or a live ctx.
        */
       internals: Object.freeze({
-        BASE_DICTIONARY,
-        composerDictionary,
-        settingsDictionary,
-        effectiveLanguage,
+        DICTIONARY,
+        NS,
         translateKey,
-        makeTranslate,
-        localeFace,
         pageDirection,
         pagePlan,
         stepIndex,
@@ -1699,10 +1530,11 @@ window.__ModuleLoader__.load({
         loadHistory,
         glideFrame,
         glideStep,
+        panelHeight,
+        CSS,
       }),
-      inject: ['slots'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
-        const locale = ctx.get('locale');
         const refreshableSessions = () => ctx.get('sessions');
         /**
          * The plugin's settings document, mirrored for every surface that reads
@@ -1742,7 +1574,7 @@ window.__ModuleLoader__.load({
           void fetch(SETTINGS_ROUTE, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ values: { ...patch, locale: patch.locale === 'zh' || patch.locale === 'en' ? patch.locale : 'auto' } }),
+            body: JSON.stringify({ values: patch }),
           }).then(async (response) => {
             const data = await response.json().catch(() => null);
             if (!response.ok || data === null || typeof data.values !== 'object') throw new Error('rejected');
@@ -1756,7 +1588,7 @@ window.__ModuleLoader__.load({
         };
 
         /** The copy for the composer surfaces, readable from key handlers as well as render. */
-        const copy = () => makeTranslate(ctx, settingsStore.get().preference);
+        const bind = ctx.locale.bind(NS);
 
         /**
          * The plugin's settings document, mirrored for every surface that reads
@@ -1782,7 +1614,6 @@ window.__ModuleLoader__.load({
                 return undefined;
               };
               return {
-                locale: value('locale') ?? 'auto',
                 showPreview: value('showPreview') !== false,
                 searchAnswers: value('searchAnswers') === true,
                 smoothScroll: value('smoothScroll') !== false,
@@ -1790,13 +1621,6 @@ window.__ModuleLoader__.load({
                 historyLimit: value('historyLimit') ?? MAX_HISTORY,
                 browseOrder: value('browseOrder') ?? 'newest',
               };
-            },
-            get preference() {
-              const candidate = state.values.locale;
-              return LANGUAGE_LABELS[candidate] === undefined ? 'auto' : candidate;
-            },
-            get language() {
-              return effectiveLanguage(ctx, state.preference);
             },
             revision: 0,
           };
@@ -1818,7 +1642,7 @@ window.__ModuleLoader__.load({
               Object.assign(savedOverrides, next);
               notify();
             },
-            /** Re-read the effective language after DSH's own locale moved. */
+            /** Republish after DSH's own locale moved (the copy is read live; this re-renders). */
             sync: notify,
             /** Republish after a surface edited the document outside the page. */
             refresh: notify,
@@ -1830,9 +1654,7 @@ window.__ModuleLoader__.load({
             },
           };
         })();
-        if (locale !== undefined && locale !== null) {
-          ctx.effect(() => locale.subscribe(() => settingsStore.sync()), 'prompt-peek: follow the DSH locale');
-        }
+        ctx.effect(() => ctx.locale.subscribe(() => settingsStore.sync()), 'prompt-peek: follow the DSH locale');
         /** One setting, exactly as the store sees it (saved override, then Host document). */
         const readNow = (key) => settingsStore.get().values[key];
         const useSettings = () => React.useSyncExternalStore(
@@ -1840,46 +1662,34 @@ window.__ModuleLoader__.load({
           () => settingsStore.get().revision,
           () => 0,
         );
-        /** Re-render on DSH locale changes, which the `auto` language follows. */
+        /**
+         * Re-render on DSH locale changes. `bind` reads the active locale per
+         * call, so the revision is only what tells React to render again —
+         * on a language switch or a late dictionary registration.
+         *
+         * The service's `subscribe` is a class method that touches
+         * `this.listeners`; handing it to React bare would call it with
+         * `this === undefined` and throw inside the composer overlay.
+         */
         const useLocaleRevision = () => React.useSyncExternalStore(
-          React.useCallback((notify) => {
-            let current = null;
-            try {
-              current = ctx.get('locale');
-            } catch (error) {
-              current = null;
-            }
-            return current === undefined || current === null ? () => {} : current.subscribe(notify);
-          }, []),
-          () => {
-            let current = null;
-            try {
-              current = ctx.get('locale');
-            } catch (error) {
-              current = null;
-            }
-            return current === undefined || current === null ? 0 : current.getSnapshot().revision;
-          },
+          (notify) => ctx.locale.subscribe(notify),
+          () => ctx.locale.getSnapshot().revision,
           () => 0,
         );
 
-        if (locale !== undefined && locale !== null) {
-          // The dictionaries feed the `auto` language; a pinned language reads
-          // the same tables directly, so both paths agree key for key. The
-          // service throws on a duplicate namespace/locale (a reload of this
-          // plugin alone), and the earlier registration stays in force.
-          const register = (ns, language, dictionary, label) => {
-            try {
-              ctx.effect(() => locale.register(ns, language, dictionary), label);
-            } catch (error) {
-              console.warn('prompt-peek: could not register the ' + language + ' dictionary for ' + ns, error);
-            }
-          };
-          register(NS, 'zh', composerDictionary('zh'), 'prompt-peek: zh dictionary');
-          register(NS, 'en', BASE_DICTIONARY, 'prompt-peek: en dictionary');
-          register(SETTINGS_NS, 'zh', settingsDictionary('zh'), 'prompt-peek: settings zh dictionary');
-          register(SETTINGS_NS, 'en', settingsDictionary('en'), 'prompt-peek: settings en dictionary');
-        }
+        // Both baseline languages in one call. The service throws on a
+        // duplicate namespace/locale (a reload of this plugin alone), and the
+        // earlier registration stays in force. That throw must not escape:
+        // `apply` registers the slot below it, so letting it out unmounts the
+        // whole plugin and `Ctrl+R` stops answering.
+        ctx.effect(() => {
+          try {
+            return ctx.locale.register(NS, DICTIONARY);
+          } catch (error) {
+            console.warn('prompt-peek: dictionaries already registered, keeping the earlier copy', error);
+            return () => {};
+          }
+        }, 'prompt-peek: dictionaries');
 
         function ComposerHistory(props) {
           const inputActions = props.inputActions;
@@ -1894,7 +1704,7 @@ window.__ModuleLoader__.load({
           // language preference, not a snapshot captured at mount.
           useSettings();
           useLocaleRevision();
-          const translate = (key) => copy()(key);
+          const translate = (key) => translateKey(bind, key);
 
           const rootRef = React.useRef(null);
           const panelRef = React.useRef(null);
@@ -1910,6 +1720,7 @@ window.__ModuleLoader__.load({
           const handlerRef = React.useRef(null);
           const pointerRef = React.useRef(null);
           const matchesRef = React.useRef(EMPTY);
+          const panelHeightPxRef = React.useRef(null);
 
           sessionRef.current = props.sessionId;
           draftRef.current = typeof draft === 'string' ? draft : '';
@@ -1924,6 +1735,8 @@ window.__ModuleLoader__.load({
           const [previewText, setPreviewText] = React.useState(null);
           const [previewAnchor, setPreviewAnchor] = React.useState(null);
           const [loadingOlder, setLoadingOlder] = React.useState(false);
+          /** The panel's own height as a number, so a reply swap can glide; null is `auto`. */
+          const [panelHeightPx, setPanelHeightPx] = React.useState(null);
           const panelOpen = panel !== null;
           // The overlay may mount before the Host and settings have answered.
           // Until both have, it renders an empty, inactive tree without
@@ -2078,7 +1891,7 @@ window.__ModuleLoader__.load({
             code: translate('codeLabel'),
             wrap: translate('wrapCode'),
             unwrap: translate('unwrapCode'),
-          }), [copy]);
+          }), [bind]);
           const previewNodes = React.useMemo(() => {
             if (previewText === null || previewText === undefined) return null;
             // A long prompt shows its tail; the first search match widens that
@@ -2255,6 +2068,39 @@ window.__ModuleLoader__.load({
               list.scrollTop = active.offsetTop + active.offsetHeight - list.clientHeight;
             }
           }, [selected, panelOpen, previewVisible]);
+
+          /**
+           * Drive the panel as a pixel height so a reply swap glides instead of
+           * snapping (see {@link panelHeight}). Measured after layout, before
+           * paint: the panel's content fires this effect whenever the list, the
+           * query, or the preview changes, and the old number is the transition's
+           * starting point. `auto` is handed back when the panel closes.
+           */
+          React.useLayoutEffect(() => {
+            const panel = panelRef.current;
+            if (panel === null || panel === undefined || !panelOpen) {
+              panelHeightPxRef.current = null;
+              setPanelHeightPx(null);
+              return;
+            }
+            // Measure on a clone, never on the panel: clearing the panel's
+            // height and writing it back in the same task makes the browser
+            // treat the value as unchanged and cancels the glide (checked in
+            // Chrome 151). The clone is laid out at the panel's width with
+            // `height:auto`, well off-screen, and removed right away.
+            const content = naturalHeight(panel);
+            const next = panelHeight({
+              open: true,
+              content,
+              viewport: window.innerHeight,
+              reduced: typeof window.matchMedia === 'function'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+            }).height;
+            if (next !== panelHeightPxRef.current) {
+              panelHeightPxRef.current = next;
+              setPanelHeightPx(next);
+            }
+          }, [panelOpen, matches, previewNodes, previewVisible, queryText, bind]);
 
           /** Scroll the row that carries a long prompt's first match into view of the preview. */
           React.useEffect(() => {
@@ -2591,6 +2437,7 @@ window.__ModuleLoader__.load({
               key: 'panel',
               ref: panelRef,
               className: 'dsh-pp-panel',
+              style: panelHeightPx === null ? undefined : { height: panelHeightPx + 'px' },
               role: 'dialog',
               'aria-label': translate('title'),
               onMouseDown: (event) => {
@@ -2641,11 +2488,12 @@ window.__ModuleLoader__.load({
                   ? h('div', { className: 'dsh-pp-empty' }, translate('empty'))
                   : matches.map(row),
               ),
-              previewVisible ? h('div', { key: 'preview', ref: previewRef, className: 'dsh-pp-preview' },
+              previewVisible ? h('div', { key: 'preview', className: 'dsh-pp-preview' },
                 h('div', { className: 'dsh-pp-preview__title' }, translate('previewTitle')),
-                previewNodes === null
-                  ? h('div', { className: 'dsh-pp-preview__empty' }, translate('previewMissing'))
-                  : h('div', { className: 'dsh-pp-preview__body' }, previewNodes),
+                // The scroller is this body, not the box around it: the title
+                // stays put as a fixed divider while PgUp / PgDn move the reply.
+                h('div', { ref: previewRef, className: previewNodes === null ? 'dsh-pp-preview__empty' : 'dsh-pp-preview__body' },
+                  previewNodes === null ? translate('previewMissing') : previewNodes),
               ) : null,
               h('div', { className: 'dsh-pp-hint' },
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('↑'), keycap('↓'), translate('hintSelect')),
@@ -2660,7 +2508,7 @@ window.__ModuleLoader__.load({
                 allowPreview ? null : h('button', {
                   type: 'button',
                   className: 'dsh-pp-hint__group dsh-pp-hint__where',
-                  title: settingsLocation(ctx),
+                  title: translateKey(bind, 'settingsLocation'),
                   onMouseDown: (event) => event.preventDefault(),
                   onClick: () => enablePreview(),
                   'data-disallow-space': 'true',
@@ -2680,8 +2528,8 @@ window.__ModuleLoader__.load({
         // Built-in plugins), with its own sidebar row and icon, instead of a tab
         // buried inside the built-in plugins section. The section is built once
         // and mounted on first selection by the settings shell.
-        const PromptPeekSettings = createSettingsPage(ctx, settingsStore, useSettings, useLocaleRevision);
-        const settingsLabel = (key) => () => translateSettingsKey(ctx, settingsStore.get().language, key);
+        const PromptPeekSettings = createSettingsPage(ctx, settingsStore, bind, useSettings, useLocaleRevision);
+        const settingsLabel = (key) => () => ctx.locale.bind(NS)(key);
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
           id: SETTING_TAB_ID,

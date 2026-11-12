@@ -30,6 +30,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The plugin's Settings page rendered blank.** `createSettingsPage` builds
+  `PromptPeekSettings`, which translates through the `bind` captured in
+  `apply`; a refactor moved `bind` behind that factory without adding it to the
+  factory's parameters, so the page threw `ReferenceError: bind is not
+  defined` on its first render and the slot was reported as crashed. The
+  parameter is passed again, and every registered surface now renders in a
+  test, so a missing free variable cannot reach the browser unseen.
+- **The composer overlay crashed on mount, so `Ctrl+R` still looked dead.**
+  The locale service's `subscribe` is a class method over `this.listeners`, and
+  it was handed to `useSyncExternalStore` bare — React calls that callback with
+  no receiver, so `this` was `undefined` and the overlay threw
+  `Cannot read properties of undefined (reading 'listeners')` before painting.
+  `apply` itself succeeded, so the failure only showed in the browser console.
+  The subscription is wrapped now, and no other locale call depends on its
+  receiver.
+- **`Ctrl+R` stopped answering: one rejected dictionary registration unmounted
+  the whole plugin.** Moving the copy onto the DSH locale service made `apply`
+  register both baseline languages in a single `ctx.locale.register(...)` call.
+  The service throws on a duplicate namespace/locale, which a second `apply` of
+  this plugin on the same page (a reload, an HMR remount) produces. That throw
+  escaped `apply`, and because the composer overlay is registered hundreds of
+  lines further down, the overlay was never mounted and the key silently did
+  nothing. The registration is guarded now: a duplicate logs a warning and the
+  earlier dictionaries stay in force.
+- **An open reply preview squeezed the prompt list to nothing.** The preview's
+  `max-height` and the list shared one capped panel, and the list
+  (`min-height:0`) had no floor, so a long reply pushed every prompt row into a
+  few invisible pixels — worst after `PgDn` paged a long answer. The list now
+  keeps three whole rows (`min-height`), rows can no longer be squashed
+  (`flex:none`, a 30px box that also holds CJK glyphs taller than the 20px line),
+  the preview's ceiling is `40%` of the panel so both always fit, and the panel
+  cap grew to `min(80vh,720px)` for long replies.
 - **`Ctrl+R` and `↑` only saw the page the Host had buffered.** A session opens
   on one page of messages, and older turns are loaded only when the transcript
   asks for them, so a long thread showed three or four prompts no matter what
@@ -40,6 +72,17 @@ All notable changes to this project are documented here. The format follows
   history. The panel count and the history pill show "Loading earlier
   prompts…" while pages arrive; nothing is written to disk and the session log
   is still never read directly.
+
+### Changed
+
+- **The interface language is DSH's, not the plugin's.** The panel, the history
+  pill, and the Settings page now read their copy from DSH's locale service
+  (`ctx.locale`), registered as one namespace holding both baseline languages.
+  The plugin's own **Interface language** setting (`Follow the DSH interface` /
+  `中文` / `English`) is gone, along with its `locale` field in
+  `~/.dsh/prompt-peek/settings.json`: an existing `locale` value is ignored and
+  dropped on the next save. A language switch in **Settings → General →
+  Language** now reaches the open panel without a reload.
 
 ## 0.3.4 - 2026-11-11
 
@@ -236,3 +279,17 @@ All notable changes to this project are documented here. The format follows
 - Markdown preview of the reply to the selected prompt, toggled with `Ctrl+Space`.
 - Page keys for the reply preview.
 - English and Chinese plugin-list metadata.
+
+### Changed
+
+- **`↑` walks the history like a shell.** It works while the composer holds a
+  draft (the draft is stashed), and both `↑` and `↓` wrap around the history
+  instead of stopping at either end.
+- **Leaving the walk always restores the draft.** `Esc`, a click back into the
+  composer, typing, and `↓` past the newest prompt all put back the text the
+  composer held when the walk began.
+- **`PgUp` / `PgDn` stop at the edge.** They no longer move the selection to the
+  previous or next prompt once the reply reaches its top or bottom, so paging
+  one reply never spills into another.
+
+## Unreleased

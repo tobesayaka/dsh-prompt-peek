@@ -12,7 +12,6 @@ process.env.DSH_HOME = testHome;
 after(() => rmSync(testHome, { recursive: true, force: true }));
 
 const DEFAULTS = {
-  locale: 'auto',
   showPreview: true,
   searchAnswers: false,
   smoothScroll: true,
@@ -89,24 +88,21 @@ test('POST saves a patch as a private file and GET reads it back', async () => {
   const home = freshHome();
   const { route } = install(undefined, home);
   const saved = await route.fetch(request('POST', {
-    values: { locale: 'en', showPreview: false, previewPageSize: 240, browseOrder: 'oldest' },
+    values: { showPreview: false, previewPageSize: 240, browseOrder: 'oldest' },
   }));
   assert.equal(saved.status, 200);
   const body = await saved.json();
   assert.equal(body.saved, true);
-  assert.equal(body.values.locale, 'en');
   assert.equal(body.values.showPreview, false);
   assert.equal(body.values.smoothScroll, true);
 
   const file = join(home, 'prompt-peek', 'settings.json');
   const stored = JSON.parse(readFileSync(file, 'utf8'));
-  assert.equal(stored.locale, 'en');
   assert.equal(stored.previewPageSize, 240);
   assert.equal(stored.browseOrder, 'oldest');
   assert.equal(statSync(file).mode & 0o777, 0o600);
 
   const reread = await (await route.fetch(request('GET'))).json();
-  assert.equal(reread.values.locale, 'en');
   assert.equal(reread.values.showPreview, false);
 });
 
@@ -140,9 +136,6 @@ test('rejects malformed settings without touching the file', async () => {
   const home = freshHome();
   const { route } = install(undefined, home);
 
-  const badLocale = await route.fetch(request('POST', { values: { locale: 'fr' } }));
-  assert.equal(badLocale.status, 400);
-  assert.deepEqual(await badLocale.json(), { error: 'invalid_setting', field: 'locale' });
 
   const badOrder = await route.fetch(request('POST', { values: { browseOrder: 'random' } }));
   assert.equal(badOrder.status, 400);
@@ -179,21 +172,22 @@ test('a hand-edited file degrades field by field', async () => {
   const home = freshHome();
   mkdirSync(join(home, 'prompt-peek'), { recursive: true });
   writeFileSync(join(home, 'prompt-peek', 'settings.json'), JSON.stringify({
-    locale: 'zh',
+    browseOrder: 'oldest',
     historyLimit: 99999,
     showPreview: 'nope',
   }));
   const { route } = install(undefined, home);
   const body = await (await route.fetch(request('GET'))).json();
-  assert.equal(body.values.locale, 'zh');
+  assert.equal(body.values.browseOrder, 'oldest');
   assert.equal(body.values.historyLimit, DEFAULTS.historyLimit);
   assert.equal(body.values.showPreview, DEFAULTS.showPreview);
 });
 
 test('normalizeSettings validates partial patches against the current values', () => {
-  assert.deepEqual(normalizeSettings({ locale: 'zh' }, DEFAULTS), { values: { ...DEFAULTS, locale: 'zh' } });
+  assert.deepEqual(normalizeSettings({ browseOrder: 'oldest' }, DEFAULTS), { values: { ...DEFAULTS, browseOrder: 'oldest' } });
   assert.deepEqual(normalizeSettings(null, DEFAULTS), { error: 'invalid_settings' });
-  assert.deepEqual(normalizeSettings({ locale: 'auto' }, DEFAULTS).values.locale, 'auto');
+  // The interface language is not a plugin setting: DSH's locale service owns it.
+  assert.deepEqual(normalizeSettings({ locale: 'zh' }, DEFAULTS), { error: 'unknown_setting', field: 'locale' });
 });
 
 test('the route registration is disposed with the plugin', async () => {
