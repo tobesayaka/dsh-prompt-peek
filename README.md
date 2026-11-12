@@ -14,7 +14,7 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 - **Search** — `Ctrl+R` opens a floating panel above the composer with the prompt list, live filtering, and match highlighting. The query field is a real input, so Chinese/Japanese IME input works.
 - **Preview** — `Space` on a selected prompt renders the *answer* dsh produced for that turn: the closing assistant text, with tool calls and reasoning left out, formatted as Markdown (headings, lists, task lists, quotes, fenced code, tables with alignment, links restricted to safe schemes). Fenced code is rendered by the host's own Shiki-based `CodeBlock`, so it is syntax highlighted in both themes and keeps the language label plus the copy and wrap controls of a chat reply.
 - **Smooth paging** — `PgUp` / `PgDn` glide through a long reply instead of jumping. Consecutive presses join into one motion, wheel, touch, or scrollbar input takes over immediately, and `prefers-reduced-motion` falls back to a direct jump.
-- **Zero footprint** — no data is written anywhere and no request leaves the machine. History is read from the session's own event window on demand.
+- **Zero footprint** — no data is written anywhere and the session log is never read from disk. History comes from the session's own event window, and when that window holds fewer prompts than the history limit the plugin asks the Host for older pages (`session.loadOlder()`), so no external request is made.
 
 ## Keys
 
@@ -80,6 +80,8 @@ The same operation is `plugin_manager` with `install_bundle` and this directory 
 
 The plugin registers one entry in the `conversation.input.overlay` slot of the composer. That entry attaches a capture-phase key listener to the composer card, so it sees the key before Lexical does, and it writes drafts through the composer's own `inputActions.setDraft()` API rather than touching the editor DOM.
 
+Opening search (`Ctrl+R`) or pressing `↑` for the first time asks the Host for older pages until the window holds the history-limit number of prompts (the Host buffers one session page by default, which is why a short history used to appear as only a few rows); it stops at the limit or when the Host says there is nothing older, and the panel count shows “Loading earlier prompts…” while it happens.
+
 History and the reply preview read the same scan of `sessions.binding(sessionId).eventSource`: a human message is any `user/message` with `source.kind === 'user'`, an assistant message is any event carrying text in `data.message.content`, and everything else (edits, replacements, tool calls) simply stays in place. The reply preview walks forward from the selected prompt to the next human message; the prompt's own text doubles as the key, so a snapshot rebuilt between listing and previewing still matches. A long prompt keeps its last 400 characters and widens back to 6000 characters when the first search match lies earlier, marking that paragraph so the preview scrolls to it — the selected list row then shows *why* it matched.
 
 The Host half owns the settings route `GET` / `POST /api/prompt-peek.settings` (read, save a patch, or `{ "reset": true }`), registered on Connection's shared `/api` handler so it inherits the same cookie, Host/Origin, and Peer checks as every other plugin route. Connection is declared inside an optional child fiber, so a profile without it still loads the plugin. The client reads the route when the section opens; the section itself registers into the `settings.section` and `settings.section.icon` slots with its own nav label and globe icon.
@@ -128,7 +130,7 @@ dsh-prompt-peek/
 
 ## Known limitations
 
-- History covers the **loaded** part of the session's event window, not the entire lifetime of a very long thread.
+- History is paged up to the history limit (300 prompts by default) but never beyond what the Host can still provide; the older part of a very long thread still needs the transcript's own “load earlier” to pull it in on the Host side.
 - History is **per session**; a brand-new session starts empty.
 - The Markdown subset is intentionally flat: no nested lists, no raw HTML, no images.
 - `Ctrl+R`/`Cmd+R` are only intercepted while the composer has keyboard focus; the browser reloads normally everywhere else.

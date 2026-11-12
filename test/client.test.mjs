@@ -301,3 +301,75 @@ test('a short reply (nothing to scroll) never starts a glide', () => {
   assert.equal(s.press(270), false);
   assert.equal(s.animation.frame, null);
 });
+
+// R5: the panel and ↑ must cover the configured history limit, not only the
+// page the Host happened to buffer. The plugin asks the Host for older pages
+// through the Session's public `loadOlder()`; this fake mirrors that surface.
+function fakeSession({ pages, hasMore = true, seed = [] }) {
+  const users = seed.slice();
+  const service = { loads: 0 };
+  const state = { hasMore, loadingOlder: false };
+  const binding = {
+    eventSource: {
+      getSnapshot: () => ({
+        hasMore: state.hasMore,
+        entries: users.map((text) => ({
+          type: 'event',
+          event: { type: 'user/message', seq: users.length, data: { source: { kind: 'user' }, content: [{ type: 'text', text }] } },
+        })),
+      }),
+      subscribe: () => () => {},
+    },
+    session: {
+      get hasMore() {
+        return state.hasMore;
+      },
+      get loadingOlder() {
+        return state.loadingOlder;
+      },
+      async loadOlder() {
+        service.loads += 1;
+        const page = pages.shift();
+        if (page === undefined) {
+          state.hasMore = false;
+          return;
+        }
+        users.unshift(...page);
+        if (pages.length === 0) state.hasMore = false;
+      },
+    },
+  };
+  service.binding = () => binding;
+  // The live buffer, so a test can assert what the window holds.
+  service.users = () => users;
+  return service;
+}
+
+/** The messages `readMessages` would see, through the public snapshot only. */
+function readMessagesFor(sessions) {
+  return sessions.binding().eventSource.getSnapshot().entries.map((entry) => ({ role: 'user', text: entry.event.data.content[0].text }));
+}
+
+test('a session without older history never loops, and a short session stays short (R5)', async () => {
+  const { loadHistory } = loadClient();
+  const done = fakeSession({ pages: [], hasMore: false });
+  await loadHistory(done, 's2', 100, async () => {});
+  assert.equal(done.loads, 0, 'hasMore=false means no request');
+  // A session that already holds the limit is not paged at all.
+  const tiny = fakeSession({ pages: [['unused']], seed: ['only'] });
+  await loadHistory(tiny, 's3', 1, async () => {});
+  assert.equal(tiny.loads, 0, 'a window already at the limit asks for nothing');
+});
+
+test('loading counts prompts the same way the list does, and never double-loads (R5)', async () => {
+  const { loadHistory, promptCount } = loadClient();
+  // Consecutive duplicates fold into one history entry, as `readHistory` does.
+  assert.equal(promptCount([{ role: 'user', text: 'a' }, { role: 'user', text: 'a' }, { role: 'user', text: 'b' }]), 2);
+  // 2 buffered prompts + a page holding a duplicate pair plus one new prompt
+  // = 2 duplicates folded to 1, so 2 + 2 = 4: still short of 5, so it asks once
+  // more and the empty page ends the loop instead of spinning.
+  const sessions = fakeSession({ pages: [['x', 'x', 'y'], []], seed: ['a', 'b'] });
+  await loadHistory(sessions, 's4', 5, async () => {});
+  assert.equal(sessions.loads, 2, 'it pulls the page that holds the new prompt, then stops');
+});
+

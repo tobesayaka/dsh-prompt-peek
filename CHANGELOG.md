@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **`Ctrl+R` and `↑` only saw the page the Host had buffered.** A session opens
+  on one page of messages, and older turns are loaded only when the transcript
+  asks for them, so a long thread showed three or four prompts no matter what
+  "History limit" said — scrolling "discover earlier" in the chat first made
+  them appear. Both entry points now pull older pages through the Session's
+  public `loadOlder()` until the window holds the configured number of prompts
+  (300 by default), stopping at the limit or when the Host reports no older
+  history. The panel count and the history pill show "Loading earlier
+  prompts…" while pages arrive; nothing is written to disk and the session log
+  is still never read directly.
+
 ## 0.3.4 - 2026-11-11
 
 ### Fixed

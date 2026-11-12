@@ -34,6 +34,8 @@ window.__ModuleLoader__.load({
     const SETTINGS_ROUTE = '/api/prompt-peek.settings';
     const MAX_HISTORY = 300;
     const MAX_RESULTS = 50;
+    /** Upper bound on older pages pulled before the panel opens (R5). */
+    const MAX_OLDER_PAGES = 40;
     const MAX_REPLY = 6000;
     const REPLY_TAIL = 400;
     /** Line height of the preview's Markdown body; page distances are quoted in these lines. */
@@ -74,6 +76,7 @@ window.__ModuleLoader__.load({
       previewTitle: "dsh's reply",
       previewMissing: 'No text reply is available in the loaded history.',
       previewOff: 'Reply preview is off',
+      loadingOlder: 'Loading earlier prompts…',
       turnOn: 'turn on',
       copyCode: 'Copy',
       copiedCode: 'Copied',
@@ -200,6 +203,7 @@ window.__ModuleLoader__.load({
         previewTitle: 'dsh 的回答',
         previewMissing: '这一条在已加载的记录里没有文字回复。',
         previewOff: '回答预览已关闭',
+        loadingOlder: '正在加载更早的提示词…',
         turnOn: '重新开启',
         copyCode: '复制',
         copiedCode: '已复制',
@@ -439,26 +443,27 @@ window.__ModuleLoader__.load({
      * an answer keeps its prompt no matter what the Host interleaves.
      * @param {any} sessions the `sessions` service, or undefined
      * @param {string} sessionId
-     * @returns {ReadonlyArray<{ role: 'user' | 'assistant', seq: number, text: string }>}
+     * @returns {{ messages: ReadonlyArray<{ role: 'user' | 'assistant', seq: number, text: string }>, hasMore: boolean }}
      */
     function readMessages(sessions, sessionId) {
-      if (sessions === undefined || sessions === null || sessionId === undefined || sessionId === null) return EMPTY;
+      const NONE = { messages: EMPTY, hasMore: false };
+      if (sessions === undefined || sessions === null || sessionId === undefined || sessionId === null) return NONE;
       let binding;
       try {
         binding = sessions.binding(sessionId);
       } catch (error) {
-        return EMPTY;
+        return NONE;
       }
-      if (binding === undefined || binding === null) return EMPTY;
+      if (binding === undefined || binding === null) return NONE;
       const source = binding.eventSource;
-      if (source === undefined || source === null || typeof source.getSnapshot !== 'function') return EMPTY;
+      if (source === undefined || source === null || typeof source.getSnapshot !== 'function') return NONE;
       let snapshot;
       try {
         snapshot = source.getSnapshot();
       } catch (error) {
-        return EMPTY;
+        return NONE;
       }
-      if (snapshot === undefined || snapshot === null || !Array.isArray(snapshot.entries)) return EMPTY;
+      if (snapshot === undefined || snapshot === null || !Array.isArray(snapshot.entries)) return NONE;
       const messages = [];
       for (const entry of snapshot.entries) {
         if (entry === null || entry === undefined || entry.type !== 'event') continue;
@@ -477,7 +482,76 @@ window.__ModuleLoader__.load({
         const text = contentText(message.content);
         if (text !== '') messages.push({ role: 'assistant', seq: event.seq, text });
       }
-      return messages;
+      return { messages, hasMore: snapshot.hasMore === true };
+    }
+
+    /** Human prompts in `messages`, counting consecutive duplicates once, like `readHistory`. */
+    function promptCount(messages) {
+      let count = 0;
+      let previous = null;
+      for (const message of messages) {
+        if (message.role !== 'user' || message.text === previous) continue;
+        previous = message.text;
+        count += 1;
+      }
+      return count;
+    }
+
+    /** Wait for the next frame, so the Host's synchronous publish is visible. */
+    function nextFrame() {
+      return new Promise((resolve) => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+        else setTimeout(resolve, 0);
+      });
+    }
+
+    /**
+     * Bring the session's event window up to `limit` human prompts before the
+     * panel (or ↑) reads it. The Host opens a session on one page and only
+     * loads older turns when the transcript asks; without this the plugin
+     * saw whatever page happened to be buffered (R5). Each step calls the
+     * Session's public `loadOlder()`, which prepends to the same event window
+     * `readMessages` reads, and stops when the limit is reached, the Host says
+     * there is no older history, or a page adds nothing (a guard against a
+     * Host that keeps claiming `hasMore` without progress).
+     *
+     * @param {any} sessions the `sessions` service
+     * @param {string} sessionId
+     * @param {number} limit history limit, in prompts
+     * @param {() => Promise<void>} settle waits for the Host to publish the page
+     * @returns {Promise<boolean>} whether the window actually grew
+     */
+    async function loadHistory(sessions, sessionId, limit, settle = nextFrame) {
+      const before = readMessages(sessions, sessionId).messages.length;
+      // The reported result is "this call grew the window", not "the window is
+      // non-empty", so a second trigger on an already-loaded session does not
+      // refresh a list that cannot have changed.
+      let grew = false;
+      let window = readMessages(sessions, sessionId);
+      for (let page = 0; page < MAX_OLDER_PAGES; page += 1) {
+        if (!window.hasMore || promptCount(window.messages) >= limit) break;
+        let session;
+        try {
+          session = sessions.binding(sessionId).session;
+        } catch (error) {
+          return false;
+        }
+        if (session === undefined || session === null || typeof session.loadOlder !== 'function') return false;
+        try {
+          // Resolves once the page is published to the event window; the Host's
+          // own `loadingOlder` guard drops a concurrent request, so a loop that
+          // ends without progress below cannot spin.
+          await session.loadOlder();
+        } catch (error) {
+          return false;
+        }
+        await settle();
+        const next = readMessages(sessions, sessionId);
+        if (next.messages.length <= window.messages.length && next.hasMore === window.hasMore) break;
+        grew = true;
+        window = next;
+      }
+      return grew && window.messages.length > before;
     }
 
     /**
@@ -561,7 +635,7 @@ window.__ModuleLoader__.load({
     function readHistory(sessions, sessionId) {
       const history = [];
       let previousText = null;
-      for (const message of readMessages(sessions, sessionId)) {
+      for (const message of readMessages(sessions, sessionId).messages) {
         if (message.role !== 'user') continue;
         if (message.text === previousText) continue;
         previousText = message.text;
@@ -583,7 +657,7 @@ window.__ModuleLoader__.load({
      * @returns {{ text: string } | null}
      */
     function readReply(sessions, sessionId, seq, hold) {
-      const messages = readMessages(sessions, sessionId);
+      const messages = readMessages(sessions, sessionId).messages;
       const start = messages.findIndex((message) => message.role === 'user'
         && (message.seq === seq || (hold !== null && hold !== undefined && message.text === hold.text)));
       if (start < 0) return null;
@@ -1483,6 +1557,8 @@ window.__ModuleLoader__.load({
         localeFace,
         pageDirection,
         pagePlan,
+        promptCount,
+        loadHistory,
         glideFrame,
         glideStep,
       }),
@@ -1708,6 +1784,7 @@ window.__ModuleLoader__.load({
           const [previewOpen, setPreviewOpen] = React.useState(false);
           const [previewText, setPreviewText] = React.useState(null);
           const [previewAnchor, setPreviewAnchor] = React.useState(null);
+          const [loadingOlder, setLoadingOlder] = React.useState(false);
           const panelOpen = panel !== null;
           // The overlay may mount before the Host and settings have answered.
           // Until both have, it renders an empty, inactive tree without
@@ -1787,13 +1864,49 @@ window.__ModuleLoader__.load({
             closeSearch(true);
           };
 
+          /** The session's prompts, capped by the history-limit setting. */
+          const historyNow = () => limitHistory(readHistory(refreshableSessions(), sessionRef.current), readNow('historyLimit'));
+
+          /**
+           * Ask the Host for older pages before reading history (R5). `Ctrl+R`
+           * waits for the window to reach the limit, so the panel opens on the
+           * full history; `↑` starts browsing at once and refreshes the list
+           * when the pages land, so a key press is never held by a request.
+           * Concurrent triggers share one load.
+           */
+          const growing = React.useRef(null);
+          const browsePending = React.useRef(false);
+          const growHistory = () => {
+            const sessions = refreshableSessions();
+            if (sessions === undefined || sessions === null || growing.current !== null) return;
+            setLoadingOlder(true);
+            growing.current = loadHistory(sessions, sessionRef.current, readNow('historyLimit'))
+              .catch(() => false)
+              .then((grew) => {
+                growing.current = null;
+                setLoadingOlder(false);
+                if (!grew) return;
+                setItems(historyNow());
+                // An `↑` pressed before any prompt was buffered starts browsing
+                // as soon as the pages that hold them arrive.
+                if (modeRef.current === null && browsePending.current && panel === null) {
+                  browsePending.current = false;
+                  const history = historyNow();
+                  if (history.length > 0) beginBrowse(history);
+                }
+              });
+          };
+
           const openSearch = () => {
             modeRef.current = null;
             setBrowse(null);
             setPreviewOpen(false);
             setPreviewText(null);
-            setItems(limitHistory(readHistory(refreshableSessions(), sessionRef.current), readNow('historyLimit')));
+            setItems(historyNow());
             setPanel({ query: '', selected: 0 });
+            // The panel is already usable; the list fills in when older pages
+            // arrive (`setItems` above runs again from `growHistory`).
+            growHistory();
           };
 
           const queryText = panel === null ? '' : panel.query;
@@ -1892,7 +2005,9 @@ window.__ModuleLoader__.load({
               return;
             }
             if (!modifier && !event.shiftKey && key === 'ArrowUp' && phaseRef.current === 'plain' && draftRef.current.trim() === '') {
-              const history = limitHistory(readHistory(refreshableSessions(), sessionRef.current), readNow('historyLimit'));
+              const history = historyNow();
+              growHistory();
+              browsePending.current = history.length === 0;
               if (history.length > 0) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -2328,7 +2443,7 @@ window.__ModuleLoader__.load({
               h('span', { className: 'dsh-pp-pill__dot' }),
               h('span', null, translate('browse')),
               h('span', { className: 'dsh-pp-pill__count' }, (browse.index + 1) + '/' + browse.total),
-              h('span', { className: 'dsh-pp-pill__hint' }, translate('browseHint')),
+              h('span', { className: 'dsh-pp-pill__hint' }, loadingOlder ? translate('loadingOlder') : translate('browseHint')),
             ),
             panelOpen ? h('div', {
               key: 'panel',
@@ -2347,7 +2462,9 @@ window.__ModuleLoader__.load({
             },
               h('div', { className: 'dsh-pp-head' },
                 h('span', { className: 'dsh-pp-title' }, translate('title')),
-                h('span', { className: 'dsh-pp-count' }, matches.length === 0 ? translate('emptyShort') : ((selected + 1) + ' / ' + matches.length)),
+                h('span', { className: 'dsh-pp-count' }, loadingOlder && items.length === 0
+                ? translate('loadingOlder')
+                : (matches.length === 0 ? translate('emptyShort') : ((selected + 1) + ' / ' + matches.length))),
               ),
               h('div', { className: 'dsh-pp-search' },
                 h('svg', { className: 'dsh-pp-search__icon', viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },

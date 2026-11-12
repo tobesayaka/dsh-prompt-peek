@@ -11,6 +11,7 @@
 | R1 | `Ctrl+R` 面板永远是英文，不跟随 DSH 界面语言 | 0.3.0 | 0.3.4 | `the language follows DSH under auto…`、`auto on a Chinese interface…`、`auto prefers a host translation…`、`auto follows a DSH language switch…`、`a pinned language ignores DSH…`、`every key the panel asks for exists in both languages` |
 | R2 | 预览未打开时按 `PgUp` / `PgDn` 没有任何反应 | 0.1.0 | 0.3.4 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
 | R3 | 按 `PgUp` 预览缓慢**向下**滚动，且停不下来 | 0.3.3 | 0.3.4 | `an upward glide step is negative, never +1`、`PgUp from a scrolled preview lands on the top, frame by frame`、`PgUp during a PgDn glide turns it around instead of continuing down` |
+| R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 未发布 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
 
 ---
 
@@ -135,6 +136,38 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ---
 
+## R5 — 历史只有宿主缓冲的那一页
+
+### 现象
+
+新会话或长会话里按 `Ctrl+R` / `↑`，只出现 3、4 条提示词，和设置里的「历史条数上限 300」完全无关；
+先在聊天界面点「发现更早」并往上滚一段，再打开面板，条目才变多。
+
+### 根因
+
+不是插件截断，而是**宿主的分页**：DSH 打开会话时只加载第一页（`paginate`，按消息数与 turn 对齐切分，
+`HISTORY_PAGE_OPTIONS = { maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } }`），
+更早的页只有在聊天界面往下翻时才由 `loadOlder()` 前插进同一个 `eventSource`。
+插件从 0.1.0 起就只读 `eventSource.getSnapshot()`（这是有意的零足迹设计），
+所以看到多少条完全取决于宿主已经加载了多少——而 `historyLimit` 只是**上限**，从没负责「往下拉」。
+
+### 修复要点
+
+- `loadHistory()`：循环调用 `binding.session.loadOlder()`，直到提示词数达到 `historyLimit`、
+  宿主 `hasMore` 为 `false`、或某一页没有进展（防止宿主声称还有却不再前进），上限 `MAX_OLDER_PAGES`。
+- `Ctrl+R` 打开面板与第一次 `↑` 都会触发；并发触发共享同一次加载（`growing` ref），不会叠加请求。
+- 计数口径与列表一致：`promptCount()` 折叠连续重复，和 `readHistory()` 同一规则。
+- 加载期间面板计数区与历史胶囊显示「正在加载更早的提示词…」。
+- 数据源不变：仍只读事件窗口，不写盘、不读会话日志——`loadOlder()` 只是让宿主多给几页。
+
+### 教训
+
+> 「只读已加载窗口」不等于「用户要的那么多」。宿主的分页对插件是透明的，
+> 只要不主动 `loadOlder()`，`historyLimit` 就只是一个永远够不到的上限。
+> 判断历史为什么少，先问**宿主加载了多少**，再看插件截了多少。
+
+---
+
 ## 用测试锁住这些问题的做法
 
 `test/client.test.mjs` 不依赖浏览器：用 `vm` 跑 `src/client.js` 的模块工厂，取它返回的 `internals`。
@@ -144,12 +177,13 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 | --- | --- |
 | `effectiveLanguage` / `translateKey` / `makeTranslate` | R1：语言解析与回退 |
 | `pageDirection` / `pagePlan` | R2：按键决策表 |
+| `promptCount` / `loadHistory` | R5：补页循环的停止条件与计数口径 |
 | `glideFrame` / `glideStep` | R3：每帧步长的符号与距离 |
 
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 25 个测试（宿主 10 + 客户端 15）
+npm test          # 27 个测试（宿主 10 + 客户端 17）
 npm run check     # node --check
 ```
 

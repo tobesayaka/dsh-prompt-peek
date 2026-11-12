@@ -221,7 +221,7 @@ test('the reply preview shares one parser with the history and survives interlea
   assert.ok(readMessages > 0 && readHistory > readMessages && readReply > readHistory);
   // Both readers go through the shared scan.
   assert.ok(source.slice(readHistory, readReply).includes('of readMessages(sessions, sessionId)'));
-  assert.ok(source.slice(readReply, readReply + 400).includes('const messages = readMessages(sessions, sessionId);'));
+  assert.ok(source.slice(readReply, readReply + 400).includes('const messages = readMessages(sessions, sessionId).messages;'));
   // The preview no longer keys on a filtered `surfaceOp === 'append'` walk.
   const replyBody = source.slice(readReply, source.indexOf('/** First match highlighted', readReply));
   assert.doesNotMatch(replyBody, /surfaceOp !== 'append'/u);
