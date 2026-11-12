@@ -6,6 +6,36 @@
 
 在输入框按 `↑` 翻回上一条你发过的消息，继续按往更早翻，`↓` 往新翻；到底 / 到顶都会循环，输入框里原有的草稿会在退出翻看时自动恢复。`Ctrl+R` 搜索当前会话的提示词，选中后按 `空格` 预览 dsh 当时的回答。
 
+## 界面语言
+
+插件**没有自己的语言设置**。搜索面板、历史胶囊、设置页和侧栏行都跟随 DSH 的界面语言——在 **设置 → 通用 → 语言** 里选一次。切换后，已经打开的面板和设置页立即跟着变，不需要刷新。
+
+只提供两种基线语言：**简体中文（`zh`）** 和 **English（`en`）**。两本字典在 `apply` 里一次性注册到 DSH 的 locale 服务（`@deepseek-ai/dsh-client-locale`），命名空间只有 `dsh-prompt-peek` 一个：
+
+```js
+inject: ['slots', 'locale'],
+apply(ctx) {
+  // 服务对重复的命名空间 / 语言会抛错——同一页面里第二次 apply（重载、HMR 重挂）
+  // 就会撞上。这个异常不能逃出 apply：输入框浮层是在它后面注册的，
+  // 一旦抛出，整个插件都不挂载，`Ctrl+R` 也就没反应了。
+  ctx.effect(() => {
+    try {
+      return ctx.locale.register(NS, DICTIONARY);
+    } catch (error) {
+      console.warn('prompt-peek: dictionaries already registered, keeping the earlier copy', error);
+      return () => {};
+    }
+  }, 'prompt-peek: dictionaries');
+}
+```
+
+- `DICTIONARY` 由面板文案（`BASE_DICTIONARY`）、`PANEL_ZH` 和设置页文案按语言合并而成；`en` 与 `zh` 的键必须完全一致，且不允许空值。
+- 渲染时用 `const t = ctx.locale.bind(NS)`；`translateKey(bind, key, params)` 只负责填 `{name}` 占位符，并在 `bind` 原样返回 key（没有语言服务）时回落到英文表。
+- 用 `React.useSyncExternalStore((notify) => ctx.locale.subscribe(notify), () => ctx.locale.getSnapshot().revision)` 在切换时重渲染；文案本身从不缓存。`subscribe` 必须用箭头包一层：它依赖 `this.listeners`，而 React 调用回调时没有接收者，裸传会让浮层在挂载时就崩。
+- `locale/en.json`、`locale/zh.json` **只**给插件管理器读取插件卡片的元信息（`meta.title`、`meta.description`），不要往里放界面文案。
+
+不要加插件自己的语言选择器、不要注册第三种语言、也不要把语言偏好写进 `settings.json`——那里残留的 `locale` 字段会被忽略，并在下次保存时被丢掉。这条约定的完整背景见上层 [README](../README.md) 的「多语言：只跟随 DSH，只做 zh / en」。
+
 ## 功能
 
 - **回翻** — 上下方向键按时间倒序翻阅当前会话里你实际发过的消息，连续重复的会合并；插件安装前发出的消息也会包含。和 Shell 一样，`↑` / `↓` 在两个方向都会循环，并且在输入框已有文字时也能翻（原草稿会在退出时恢复）。
@@ -46,7 +76,7 @@
 
 | 设置项 | 默认值 | 作用 |
 | --- | --- | --- |
-| 显示回答预览 | 开 | 关掉后 `空格` 不再打开回答预览。搜索面板底部会说明这一点，并提供「重新开启」按钮，点一下就会保存设置并立刻恢复预览，不用去设置页。 |
+| 显示回答预览 | 开 | 关掉后 `空格` 不再打开回答预览。搜索面板底部会说明这一点，并提供「重新开启」按钮，点一下就会保存设置并立刻恢复预览，不用去设置页；鼠标悬停会提示该页的位置（`设置 → 输入框速览`）。 |
 | 平滑翻页 | 开 | `PgUp` / `PgDn` 和滚轮是平滑滚动而不是直接跳动；系统要求「减少动态效果」时始终直接跳。 |
 | 每页滚动距离 | 270 px（约 15 行） | 一次 `PgUp` / `PgDn` 让预览移动的距离；鼠标滚轮一格移动它的四分之一。预览到顶 / 到底后再按就停在原地，不切换提示词。 |
 | 同时搜索回答 | 关 | 打开后搜索关键词也匹配 dsh 的回答（这条提问之后到下一条人类消息之间的助手文字，不含工具调用和推理）。列表仍显示你的提问，通过回答命中的行会标出「回答命中」。 |
@@ -55,7 +85,7 @@
 
 **保存**提交整张表单；**恢复配置默认值**删除设置文件。保存后已打开的输入框立即生效，无需刷新页面。
 
-设置存放在 `~/.dsh/prompt-peek/settings.json`（文件权限 `0600`），而不是 DSH 的用户设置文档——同一个 DSH home 下可能有多个 profile 安装同一份本地 checkout，这样它们共用一套偏好。文件里只有以上七个字段，**不保存**提示词、回答或任何会话内容。`cordis.patch.yml` 的 `config` 是基线，设置文件只存覆盖项。
+设置存放在 `~/.dsh/prompt-peek/settings.json`（文件权限 `0600`），而不是 DSH 的用户设置文档——同一个 DSH home 下可能有多个 profile 安装同一份本地 checkout，这样它们共用一套偏好。文件里只有以上六个字段，**不保存**提示词、回答或任何会话内容。`cordis.patch.yml` 的 `config` 是基线，设置文件只存覆盖项。
 
 ## 安装
 
@@ -78,11 +108,11 @@
 
 插件在输入框的 `conversation.input.overlay` 槽注册一个条目。该条目在输入框卡片上挂一个捕获阶段的键盘监听，因此能在 Lexical 之前拿到按键；它通过输入框自己的 `inputActions.setDraft()` 写入草稿，而不是直接操作编辑器 DOM。
 
-打开搜索（`Ctrl+R`）或第一次按 `↑` 时，如果事件窗口里的提示词还不到「历史条数上限」，插件会循环调用宿主的 `session.loadOlder()` 把更早的页补进来——宿主默认只缓冲会话的一页，这正是以前「只看到 3 条」的原因——补到上限或宿主说没有更早的历史为止；加载期间面板计数区显示「正在加载更早的提示词…」。
+打开搜索（`Ctrl+R`）或第一次按 `↑` 时，如果事件窗口里的提示词还不到「历史条数上限」，插件会循环调用宿主的 `session.loadOlder()` 把更早的页补进来——宿主默认只缓冲会话的一页，这正是以前「只看到 3 条」的原因——补到上限、宿主说没有更早的历史、或补满 40 页为止；加载期间面板计数区显示「正在加载更早的提示词…」。
 
 历史和回答预览读的是同一份扫描结果：人类消息是 `source.kind === 'user'` 的 `user/message`，助手消息是任何带 `data.message.content` 文本的事件，其余事件（编辑、替换、工具调用）原地保留、不再遮挡邻居；「历史条数上限」在折叠连续重复之后截取最新的 N 条。回答预览从选中的提示词向后走到下一条人类消息；提示词自身的文本同时作为匹配键，所以即使列表和预览之间事件窗口被重建，也能对上。很长的提示词保留末尾 400 字符；如果第一个搜索命中出现在更早的位置，窗口会向前扩展到 6000 字符并标记命中的段落，预览随即滚到那里——这样选中的列表行就能展示「为什么它匹配」。
 
-宿主侧提供设置路由 `GET` / `POST /api/prompt-peek.settings`（读取、保存补丁、或 `{ "reset": true }`），注册在 Connection 共享的 `/api` 处理器上，因此与其他插件路由一样带 cookie、Host/Origin 和 Peer 校验。Connection 声明在可选的子 fiber 里，没有它的 profile 也能正常加载插件。设置页打开时读取一次；页面本身注册在 `settings.section` 与 `settings.section.icon` 槽，自带侧栏名称和地球图标。
+宿主侧提供设置路由 `GET` / `POST /api/prompt-peek.settings`（读取、保存补丁、或 `{ "reset": true }`），注册在 Connection 共享的 `/api` 处理器上，因此与其他插件路由一样带 cookie、Host/Origin 和 Peer 校验。Connection 声明在可选的子 fiber 里，没有它的 profile 也能正常加载插件。设置页打开时读取一次；页面本身注册在 `settings.section` 与 `settings.section.icon` 槽（order 40），自带侧栏名称和地球图标；这两个槽的 `label` 都是函数，每次调用读 `ctx.locale.bind(NS)`，所以 DSH 切语言时侧栏行跟着变，不需要重新注册。
 
 设置页关闭时插件使用文档里的默认值；本次会话中保存过的值会立刻应用到所有已打开的输入框。DSH 切换语言时，搜索面板和设置页一起跟着变，不需要刷新。
 
@@ -96,6 +126,7 @@ dsh-prompt-peek/
 │   ├── index.js
 │   └── client.js
 ├── test/
+│   ├── client.test.mjs
 │   └── settings.test.mjs
 ├── docs/
 │   └── REGRESSIONS.md
@@ -121,10 +152,11 @@ dsh-prompt-peek/
 2. 修改 `src/client.js`。
 3. 重新加载客户端模块：在 Plugins 页面禁用再启用该 bundle（推荐 HMR），或在宿主无法重新组合时刷新页面 / 重启 DSH。
 
-- `npm test` 运行宿主侧设置测试（`test/settings.test.mjs`，基于 `node:test`）：校验、落盘、重置、坏文件回退。测试使用临时 `DSH_HOME`，不碰真实数据。同时运行 `test/client.test.mjs`：用 `vm` 在无浏览器环境加载客户端工厂，检查它导出的纯函数——语言解析、`Ctrl+R` 的归属判定、历史翻看的草稿存取、提问/回答过滤、只取文字的消息扫描，以及逐帧模拟预览翻页。
+- `npm test` 运行完整测试套件（`node --test`）。`test/settings.test.mjs` 覆盖宿主侧：校验、落盘、重置、坏文件回退，使用临时 `DSH_HOME`，不碰真实数据。`test/client.test.mjs` 用 `vm` 在无浏览器环境加载客户端工厂，检查它导出的纯函数和语言契约：通过假 locale 服务验证语言解析、`Ctrl+R` 的归属判定、历史翻看的草稿存取、提问/回答过滤、只取文字的消息扫描、逐帧模拟预览翻页，以及面板高度计算。
 - `npm run check` 对两个入口执行 `node --check`。
 - 客户端改动需要刷新页面或禁用再启用 bundle；宿主改动需要重启 DSH。
-- 修改 `glideStep`、`glideFrame`、`pagePlan` 或 `translateKey` 之前，先读 [docs/REGRESSIONS.md](docs/REGRESSIONS.md)，并按里面的方法做反向验证：把旧代码放回去，确认对应测试会失败。
+- 修改 `glideStep`、`glideFrame`、`pagePlan`、`panelHeight`、`translateKey` 或注册的字典之前，先读 [docs/REGRESSIONS.md](docs/REGRESSIONS.md)，并按里面的方法做反向验证：把旧代码放回去，确认对应测试会失败。
+- 改文案时：同一个键同时加到 `en` 和 `zh`，两边的 `{占位符}` 保持一致，不要渲染字面量字符串。两本字典键集一旦漂移，`the one namespace carries every key …` 测试会失败。
 
 ## 已知限制
 
@@ -132,13 +164,13 @@ dsh-prompt-peek/
 - 历史按会话隔离；全新会话从空开始。
 - Markdown 子集刻意保持扁平：不支持嵌套列表、原始 HTML、图片。
 - `Ctrl+R`/`Cmd+R` 只在输入框获得焦点时拦截；在页面其他地方浏览器仍会正常刷新。
-- 插件语言覆盖插件自己的界面（搜索面板、历史胶囊、设置页这些组件内的文案）；设置页外层的 DSH 页面标题、侧栏骨架由宿主按 DSH 语言显示。
+- 插件文案只覆盖插件自己的界面（搜索面板、历史胶囊、设置页、侧栏行），且只有中英两种语言；设置页外层的 DSH 页面标题、侧栏骨架由宿主显示。DSH 切到第三种语言（`ja`、`de` 等）时，插件显示英文基线文案，因为只注册了两本基线字典。
 - 设置页每次打开时读取一次设置文件；直接手改文件后，需要重新打开设置页或重启插件才会反映。
 
 ## 踩过的坑
 
 [docs/REGRESSIONS.md](docs/REGRESSIONS.md) 记录本插件发布过又修掉的问题：语言为什么没跟随 DSH、`PgUp` / `PgDn`
-为什么按了没反应、以及让 `PgUp` 一直向下滚的逐帧符号 bug。每条都写明对应的回归测试，防止再犯。
+为什么按了没反应、让 `PgUp` 一直向下滚的逐帧符号 bug、`Ctrl+R` 只看得到宿主已缓冲的那一页，以及回答预览把提示词列表挤成一条线。每条都写明对应的回归测试，防止再犯。
 
 ## 更新日志
 

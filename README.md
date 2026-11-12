@@ -8,6 +8,37 @@ Press `↑` in the composer to get the last message you sent back. Keep pressing
 
 > **中文速览**：在 DSH 输入框里按 `↑` 翻回上一条你发过的消息，`Ctrl+R` 按关键词搜索；选中后按 `空格` 预览当时的回答，`Shift+空格` 在搜索框里输入空格。完整的[中文文档](README.zh-CN.md)在这里。
 
+## Interface language
+
+The plugin has **no language setting of its own**. Its copy — the search panel, the history pill, the Settings page, and the sidebar row — follows DSH's interface language, chosen once in **Settings → General → Language**. Switching that setting moves the panel and the page immediately, without a reload.
+
+Only the two baseline languages exist: **简体中文 (`zh`)** and **English (`en`)**. Both dictionaries are registered with DSH's locale service (`@deepseek-ai/dsh-client-locale`) under the single namespace `dsh-prompt-peek`, in one call:
+
+```js
+inject: ['slots', 'locale'],
+apply(ctx) {
+  // The service throws on a duplicate namespace/locale — a second apply on the
+  // same page (a reload, an HMR remount) produces one. That throw must not
+  // escape: `apply` registers the composer overlay further down, so letting it
+  // out unmounts the whole plugin and `Ctrl+R` stops answering.
+  ctx.effect(() => {
+    try {
+      return ctx.locale.register(NS, DICTIONARY);
+    } catch (error) {
+      console.warn('prompt-peek: dictionaries already registered, keeping the earlier copy', error);
+      return () => {};
+    }
+  }, 'prompt-peek: dictionaries');
+}
+```
+
+- `DICTIONARY` holds the panel copy (`BASE_DICTIONARY`) plus `PANEL_ZH` and the Settings page strings, merged per language; `en` and `zh` must carry the same keys, and no value may be empty.
+- Rendering reads `const t = ctx.locale.bind(NS)`; `translateKey(bind, key, params)` only fills `{name}` placeholders and falls back to the English table when `bind` echoes the key (no locale service).
+- `React.useSyncExternalStore((notify) => ctx.locale.subscribe(notify), () => ctx.locale.getSnapshot().revision)` re-renders on a switch; the copy itself is never cached. Wrap `subscribe` in an arrow: it is a class method over `this.listeners`, and React calls the callback with no receiver, so passing it bare throws inside the overlay on mount.
+- `locale/en.json` and `locale/zh.json` are **only** the plugin-card metadata (`meta.title`, `meta.description`) that the Plugin Manager reads. Never put UI copy there.
+
+Do not add a plugin-owned language picker, register a third language, or persist a language preference in `settings.json` — an old `locale` field there is ignored and dropped on the next save. The workspace contract behind this is in the parent README's “多语言：只跟随 DSH，只做 zh / en”.
+
 ## Features
 
 - **Recall** — the arrow keys walk the prompts you actually sent in the current session, newest first. Consecutive duplicates are folded; messages sent before the plugin was installed are included. Like a shell, `↑` / `↓` wrap in both directions and work even when the composer holds a draft (the draft is restored when the walk ends).
@@ -48,7 +79,7 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
+| Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately; hovering it names where the page lives (`Settings → Prompt peek`). |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
 | Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. Once the preview reaches either edge, `PgUp` / `PgDn` stop there instead of moving the selection. |
 | Also search replies | off | Match the query against dsh's replies as well (the assistant text between this prompt and the next human message, without tool calls or reasoning). The list still shows your prompts; a row matched through its reply is marked “reply match”. |
@@ -57,7 +88,7 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 
 **Save** writes the whole form; **Reset to profile defaults** deletes the settings file. A save applies immediately in open composers, without a reload.
 
-Settings live in `~/.dsh/prompt-peek/settings.json` (file mode `0600`), not in the DSH user-settings document, so a local checkout shared by several profiles keeps one set of preferences. Only these seven fields are stored — never prompts, replies, or session text. `cordis.patch.yml`'s `config` is the baseline; the file holds overrides.
+Settings live in `~/.dsh/prompt-peek/settings.json` (file mode `0600`), not in the DSH user-settings document, so a local checkout shared by several profiles keeps one set of preferences. Only these six fields are stored — never prompts, replies, or session text. `cordis.patch.yml`'s `config` is the baseline; the file holds overrides.
 
 ## Install
 
@@ -80,11 +111,11 @@ The same operation is `plugin_manager` with `install_bundle` and this directory 
 
 The plugin registers one entry in the `conversation.input.overlay` slot of the composer. That entry attaches a capture-phase key listener to the composer card, so it sees the key before Lexical does, and it writes drafts through the composer's own `inputActions.setDraft()` API rather than touching the editor DOM.
 
-Opening search (`Ctrl+R`) or pressing `↑` for the first time asks the Host for older pages until the window holds the history-limit number of prompts (the Host buffers one session page by default, which is why a short history used to appear as only a few rows); it stops at the limit or when the Host says there is nothing older, and the panel count shows “Loading earlier prompts…” while it happens.
+Opening search (`Ctrl+R`) or pressing `↑` for the first time asks the Host for older pages until the window holds the history-limit number of prompts (the Host buffers one session page by default, which is why a short history used to appear as only a few rows); it stops at the limit, when the Host says there is nothing older, or after 40 pages, and the panel count shows “Loading earlier prompts…” while it happens.
 
 History and the reply preview read the same scan of `sessions.binding(sessionId).eventSource`: a human message is any `user/message` with `source.kind === 'user'`, an assistant message is any event carrying text in `data.message.content`, and everything else (edits, replacements, tool calls) simply stays in place. The reply preview walks forward from the selected prompt to the next human message; the prompt's own text doubles as the key, so a snapshot rebuilt between listing and previewing still matches. A long prompt keeps its last 400 characters and widens back to 6000 characters when the first search match lies earlier, marking that paragraph so the preview scrolls to it — the selected list row then shows *why* it matched.
 
-The Host half owns the settings route `GET` / `POST /api/prompt-peek.settings` (read, save a patch, or `{ "reset": true }`), registered on Connection's shared `/api` handler so it inherits the same cookie, Host/Origin, and Peer checks as every other plugin route. Connection is declared inside an optional child fiber, so a profile without it still loads the plugin. The client reads the route when the section opens; the section itself registers into the `settings.section` and `settings.section.icon` slots with its own nav label and globe icon.
+The Host half owns the settings route `GET` / `POST /api/prompt-peek.settings` (read, save a patch, or `{ "reset": true }`), registered on Connection's shared `/api` handler so it inherits the same cookie, Host/Origin, and Peer checks as every other plugin route. Connection is declared inside an optional child fiber, so a profile without it still loads the plugin. The client reads the route when the section opens; the section itself registers into the `settings.section` and `settings.section.icon` slots (order 40) with its own nav label and globe icon. Both slots' `label` is a function that reads `ctx.locale.bind(NS)` live, so the sidebar row follows a language switch without re-registering.
 
 While the page is closed the plugin works from its documented defaults; values saved during the session apply to every open composer at once. A DSH language switch moves the panel and this page with it, without a reload.
 
@@ -98,6 +129,7 @@ dsh-prompt-peek/
 │   ├── index.js
 │   └── client.js
 ├── test/
+│   ├── client.test.mjs
 │   └── settings.test.mjs
 ├── docs/
 │   └── REGRESSIONS.md
@@ -115,7 +147,7 @@ dsh-prompt-peek/
 └── cordis.patch.yml
 ```
 
-`src/index.js` is the host half (settings route and file); `src/client.js` is the client entry with the keyboard handling, Markdown renderer, Settings page, and styles. `locale/` serves the plugin-list metadata, the document selected for the plugin detail page, and the tab label.
+`src/index.js` is the host half (settings route and file); `src/client.js` is the client entry with the keyboard handling, Markdown renderer, Settings page, and styles. `locale/` holds only the Plugin Manager metadata (`meta.title` / `meta.description`, one file per baseline language). All UI copy lives in `src/client.js` as the registered dictionary — see [Interface language](#interface-language).
 
 ## Development
 
@@ -123,10 +155,11 @@ dsh-prompt-peek/
 2. Edit `src/client.js`.
 3. Reload the client module: disable and re-enable the bundle in the Plugins page (HMR recommends it), or reload the page / restart DSH when the host cannot recompose.
 
-- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one. It also runs `test/client.test.mjs`, which loads the client factory in a `vm` sandbox (no browser) and checks the pure helpers it returns: language resolution, the `Ctrl+R` ownership rule, the history walk's draft stashing, prompt/reply filtering, the text-only message scan, and a frame-by-frame simulation of the preview glide.
+- `npm test` runs the full suite (`node --test`). `test/settings.test.mjs` covers the Host half: validation, persistence, reset, and the malformed-file fallbacks, against a temporary `DSH_HOME`, never the real one. `test/client.test.mjs` loads the client factory in a `vm` sandbox (no browser) and checks the pure helpers it returns plus the locale contract: language resolution through a fake locale service, the `Ctrl+R` ownership rule, the history walk's draft stashing, prompt/reply filtering, the text-only message scan, a frame-by-frame simulation of the preview glide, and panel sizing.
 - `npm run check` runs `node --check` over both entry points.
 - Client changes need a page reload or a disable/enable of the bundle; Host changes need a DSH restart.
-- Before changing `glideStep`, `glideFrame`, `pagePlan`, or `translateKey`, read [docs/REGRESSIONS.md](docs/REGRESSIONS.md) and run its reverse checks: put the old code back and watch the named tests fail.
+- Before changing `glideStep`, `glideFrame`, `pagePlan`, `panelHeight`, `translateKey`, or the registered dictionary, read [docs/REGRESSIONS.md](docs/REGRESSIONS.md) and run its reverse checks: put the old code back and watch the named tests fail.
+- When touching copy: add the key to both `en` and `zh`, keep `{placeholders}` identical in both, and never render a literal string. The `the one namespace carries every key …` test fails if the two key sets drift apart.
 
 ## Known limitations
 
@@ -134,14 +167,15 @@ dsh-prompt-peek/
 - History is **per session**; a brand-new session starts empty.
 - The Markdown subset is intentionally flat: no nested lists, no raw HTML, no images.
 - `Ctrl+R`/`Cmd+R` are only intercepted while the composer has keyboard focus; the browser reloads normally everywhere else.
-- The plugin's language covers the plugin's own surfaces (search panel, history pill, Settings page). DSH's slot chrome around the Settings tab is labelled by the host, which follows the DSH language.
+- The plugin's copy covers the plugin's own surfaces (search panel, history pill, Settings page, sidebar row), in Chinese and English only. DSH's slot chrome around the Settings page is labelled by the host. A third DSH language (`ja`, `de`, …) shows the English baseline, because only the two baseline dictionaries are registered.
 - The Settings page reads the saved file when it opens. A change made by editing the file directly is picked up after the page is reopened or the plugin is restarted.
 
 ## Known regressions
 
 [docs/REGRESSIONS.md](docs/REGRESSIONS.md) records the bugs this plugin has shipped and fixed — how the
-language follow broke, why `PgUp` / `PgDn` appeared to do nothing, and the per-frame sign bug that made
-`PgUp` scroll downward forever. Each entry names the test that keeps it from coming back.
+language follow broke, why `PgUp` / `PgDn` appeared to do nothing, the per-frame sign bug that made
+`PgUp` scroll downward forever, `Ctrl+R` only seeing the buffered page, and the reply preview squeezing
+the prompt list to nothing. Each entry names the test that keeps it from coming back.
 
 ## Changelog
 
