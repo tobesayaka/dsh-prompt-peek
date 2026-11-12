@@ -4,14 +4,14 @@
 
 **Shell-style prompt recall with a Markdown answer preview for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web composer.**
 
-Press `↑` in an empty composer to get the last message you sent back. Keep pressing to walk further back, `↓` to come forward. `Ctrl+R` searches the session's prompts, and `Space` peeks at the reply dsh gave you at the time.
+Press `↑` in the composer to get the last message you sent back. Keep pressing to walk further back, `↓` to come forward; both directions wrap, and a draft already in the composer comes back when the walk ends. `Ctrl+R` searches the session's prompts, and `Space` peeks at the reply dsh gave you at the time.
 
 > **中文速览**：在 DSH 输入框里按 `↑` 翻回上一条你发过的消息，`Ctrl+R` 按关键词搜索；选中后按 `空格` 预览当时的回答，`Shift+空格` 在搜索框里输入空格。完整的[中文文档](README.zh-CN.md)在这里。
 
 ## Features
 
-- **Recall** — the arrow keys walk the prompts you actually sent in the current session, newest first. Consecutive duplicates are folded; messages sent before the plugin was installed are included.
-- **Search** — `Ctrl+R` opens a floating panel above the composer with the prompt list, live filtering, and match highlighting. The query field is a real input, so Chinese/Japanese IME input works.
+- **Recall** — the arrow keys walk the prompts you actually sent in the current session, newest first. Consecutive duplicates are folded; messages sent before the plugin was installed are included. Like a shell, `↑` / `↓` wrap in both directions and work even when the composer holds a draft (the draft is restored when the walk ends).
+- **Search** — `Ctrl+R` opens a floating panel above the composer with the prompt list, live filtering, and match highlighting. The query field is a real input, so Chinese/Japanese IME input works. By default the query only matches prompts; turn on **Also search replies** in Settings to match dsh's replies too — the list still shows your prompts and a row matched through its reply is marked “reply match”.
 - **Preview** — `Space` on a selected prompt renders the *answer* dsh produced for that turn: the closing assistant text, with tool calls and reasoning left out, formatted as Markdown (headings, lists, task lists, quotes, fenced code, tables with alignment, links restricted to safe schemes). Fenced code is rendered by the host's own Shiki-based `CodeBlock`, so it is syntax highlighted in both themes and keeps the language label plus the copy and wrap controls of a chat reply.
 - **Smooth paging** — `PgUp` / `PgDn` glide through a long reply instead of jumping. Consecutive presses join into one motion, wheel, touch, or scrollbar input takes over immediately, and `prefers-reduced-motion` falls back to a direct jump.
 - **Zero footprint** — no data is written anywhere and the session log is never read from disk. History comes from the session's own event window, and when that window holds fewer prompts than the history limit the plugin asks the Host for older pages (`session.loadOlder()`), so no external request is made.
@@ -22,9 +22,9 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 
 | Key | Action |
 | --- | --- |
-| `↑` | Recall the previous prompt. Only starts from an empty composer, then keeps browsing. |
-| `↓` | Move back toward newer prompts; past the newest one the composer clears. |
-| `Esc` | Leave history browsing (the recalled text stays in the composer). |
+| `↑` | Recall the previous prompt. Works whether the composer is empty or holds a draft (the draft is stashed first). Wraps from the oldest prompt to the newest. |
+| `↓` | Move toward newer prompts. Past the newest one the walk ends and the original draft comes back. |
+| `Esc` | Leave history browsing; the composer gets back the draft it held before the walk. |
 | `Enter` | Send the recalled prompt, exactly like typing it. |
 | `Ctrl+R` / `Cmd+R` | Open reverse search over the prompts of this session. |
 
@@ -35,7 +35,7 @@ Press `↑` in an empty composer to get the last message you sent back. Keep pre
 | `↑` / `↓` | Select a match. |
 | `Space` | Toggle the Markdown preview of the reply to the selected prompt. |
 | `Shift+Space` | Type a literal space in the search query. |
-| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 270 px, about fifteen lines); hold to keep scrolling, release to stop. If the preview is not open yet, the first press opens it; at the top or bottom edge it moves the selection to the previous or next prompt instead of doing nothing. |
+| `PgUp` / `PgDn` | Glide the reply preview by the configured page distance (default 270 px, about fifteen lines); hold to keep scrolling, release to stop. If the preview is not open yet, the first press opens it; at the top or bottom edge it stops there and never moves to the next prompt. |
 | Mouse wheel | While the preview is open, the wheel over the search box scrolls the reply a quarter page per notch. |
 | `Enter` | Put the selected prompt into the composer. |
 | `Esc` | Close search. |
@@ -51,13 +51,14 @@ The plugin has its own section in **Settings** — a sidebar row named **Prompt 
 | Interface language | Follow the DSH interface | `中文` or `English` pins the plugin's own copy — the search panel, the history pill, and this page — even while DSH runs in the other language. Chosen from a small globe menu and saved on the spot. **Follow the DSH interface** takes the language from DSH's active locale live, including `zh-CN`-style tags, so the panel and this page switch whenever DSH's language does. |
 | Show reply preview | on | When off, `Space` no longer opens the reply preview. The panel footer says so and offers **turn on**, which saves the change and brings the preview back immediately. |
 | Smooth paging | on | `PgUp` / `PgDn` and the wheel glide through the preview instead of jumping. Systems that ask for reduced motion always jump. |
-| Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. Once the preview reaches either edge, `PgUp` / `PgDn` move the selection to the previous / next prompt instead of appearing to do nothing. |
+| Page distance | 270 px (≈ 15 lines) | How far one `PgUp` / `PgDn` press moves the preview. One mouse-wheel notch moves a quarter of that. Once the preview reaches either edge, `PgUp` / `PgDn` stop there instead of moving the selection. |
+| Also search replies | off | Match the query against dsh's replies as well (the assistant text between this prompt and the next human message, without tool calls or reasoning). The list still shows your prompts; a row matched through its reply is marked “reply match”. |
 | History limit | 300 | How many of the session's most recent prompts recall and search read. |
 | Result order | Newest first | `Oldest first` lists matches like a rendered listbox (ARIA pops the listbox upward, so keeping the selected prompt next to the composer is `Newest first`, the shell order). |
 
 **Save** writes the whole form; **Reset to profile defaults** deletes the settings file. A save applies immediately in open composers, without a reload.
 
-Settings live in `~/.dsh/prompt-peek/settings.json` (file mode `0600`), not in the DSH user-settings document, so a local checkout shared by several profiles keeps one set of preferences. Only these six fields are stored — never prompts, replies, or session text. `cordis.patch.yml`'s `config` is the baseline; the file holds overrides.
+Settings live in `~/.dsh/prompt-peek/settings.json` (file mode `0600`), not in the DSH user-settings document, so a local checkout shared by several profiles keeps one set of preferences. Only these seven fields are stored — never prompts, replies, or session text. `cordis.patch.yml`'s `config` is the baseline; the file holds overrides.
 
 ## Install
 

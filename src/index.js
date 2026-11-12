@@ -14,8 +14,8 @@ import { dirname, join } from 'node:path';
  * rather than the Host user settings document, because it may be installed from
  * a local checkout into several profiles while sharing one DSH home. Only the
  * plugin's own choices live there — UI language, preview panel, smooth paging,
- * page size, history length, and the "newer answers" filter — never session
- * text, prompts, or replies.
+ * page size, history length, the result order, and whether the query also
+ * matches replies — never session text, prompts, or replies.
  *
  * The route is registered on Connection's shared `/api` handler, so it inherits
  * the browser cookie, Host/Origin checks, and Peer admission, like the other
@@ -37,6 +37,8 @@ const DEFAULTS = Object.freeze({
   locale: 'auto',
   /** Show the reply preview column inside the search panel. */
   showPreview: true,
+  /** Let the search query match the reply text as well as the prompt. */
+  searchAnswers: false,
   /** Glide the preview between pages instead of jumping. */
   smoothScroll: true,
   /**
@@ -89,7 +91,7 @@ export function normalizeSettings(input, current) {
       values[key] = value;
       continue;
     }
-    if (key === 'showPreview' || key === 'smoothScroll') {
+    if (key === 'showPreview' || key === 'smoothScroll' || key === 'searchAnswers') {
       if (typeof value !== 'boolean') return { error: 'invalid_setting', field: key };
       values[key] = value;
       continue;

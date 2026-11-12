@@ -11,6 +11,8 @@
 | R1 | `Ctrl+R` 面板永远是英文，不跟随 DSH 界面语言 | 0.3.0 | 0.3.4 | `the language follows DSH under auto…`、`auto on a Chinese interface…`、`auto prefers a host translation…`、`auto follows a DSH language switch…`、`a pinned language ignores DSH…`、`every key the panel asks for exists in both languages` |
 | R2 | 预览未打开时按 `PgUp` / `PgDn` 没有任何反应 | 0.1.0 | 0.3.4 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
 | R3 | 按 `PgUp` 预览缓慢**向下**滚动，且停不下来 | 0.3.3 | 0.3.4 | `an upward glide step is negative, never +1`、`PgUp from a scrolled preview lands on the top, frame by frame`、`PgUp during a PgDn glide turns it around instead of continuing down` |
+| R6 | `↑` 在输入框有草稿时不翻历史；`↑` / `↓` 到头即停，退出翻看时草稿被丢掉 | 0.1.0 | 0.4.0 | `↑ and ↓ wrap around the walk, and ↓ past the newest entry returns to the draft` |
+| R7 | 回答翻到顶 / 到底后继续按 `PgDn` / `PgUp` 会串到下一条提问 | 0.1.0 | 0.4.0 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
 | R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 未发布 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
 
 ---
@@ -179,11 +181,13 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 | `pageDirection` / `pagePlan` | R2：按键决策表 |
 | `promptCount` / `loadHistory` | R5：补页循环的停止条件与计数口径 |
 | `glideFrame` / `glideStep` | R3：每帧步长的符号与距离 |
+| `stepIndex` | R6：`↑` / `↓` 的循环与回到草稿 |
+| `readHistory` | 「同时搜索回答」：每条提问附带它之后、下一条提问之前的回答文本 |
 
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 27 个测试（宿主 10 + 客户端 17）
+npm test          # 30 个测试（宿主 10 + 客户端 20）
 npm run check     # node --check
 ```
 
@@ -199,3 +203,6 @@ return remaining > 0 ? Math.floor(advance) : Math.ceil(advance);
 
 R1 同理：把 `translateKey` 的 `own`（回退表）改回固定 `composerDictionary('en')`，
 前两条语言测试应当失败。**任何新加的回归测试都请做一次这样的反向验证**，否则它可能只是碰巧通过。
+
+R6 / R7 的反向验证：把 `stepIndex` 的越界返回值改回 `0`、把 `pagePlan` 的 `edge` 改回 `scroll`，
+新增的两条测试必须失败；换回来必须全部通过（0.4.0 发布前照此验过）。

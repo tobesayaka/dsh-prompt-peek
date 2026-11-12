@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 - 2026-11-12
+
+### Added
+
+- **Also search replies** (`searchAnswers`, off by default). The query now
+  optionally matches dsh's replies as well as your prompts: the assistant text
+  that follows a prompt up to the next human message, without tool calls or
+  reasoning. The list still shows your prompts, and a row matched through its
+  reply carries a “reply match” badge.
+
+### Changed
+
+- **`↑` walks the history like a shell.** It works while the composer holds a
+  draft (the draft is stashed), and both `↑` and `↓` wrap around the history
+  instead of stopping at either end.
+- **Leaving the walk always restores the draft.** `Esc`, a click back into the
+  composer, typing, and `↓` past the newest prompt all put back the text the
+  composer held when the walk began.
+- **`PgUp` / `PgDn` stop at the edge.** They no longer move the selection to the
+  previous or next prompt once the reply reaches its top or bottom, so paging
+  one reply never spills into another.
+
 ## Unreleased
 
 ### Fixed

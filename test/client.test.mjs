@@ -36,6 +36,8 @@ const {
   pagePlan: pagePlanOf,
   glideFrame,
   glideStep,
+  stepIndex,
+  readHistory,
 } = loadClient();
 
 /** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
@@ -128,8 +130,9 @@ test('PgUp and PgDn page the preview, open it when hidden, and never do nothing'
   assert.deepEqual(pagePlan(pageDirection('PageUp'), true, true, false), { action: 'scroll', delta: -1 });
   // Hidden preview: the press opens it instead of falling through silently.
   assert.deepEqual(pagePlan(pageDirection('PageUp'), false, true, true), { action: 'open', delta: -1 });
-  // At the edge: move the selection rather than leaving the key to the chat.
-  assert.deepEqual(pagePlan(pageDirection('PageDown'), true, true, true), { action: 'step', delta: 1 });
+  // At the edge: stop there. Paging one reply never moves to the next prompt.
+  assert.deepEqual(pagePlan(pageDirection('PageDown'), true, true, true), { action: 'edge', delta: 1 });
+  assert.deepEqual(pagePlan(pageDirection('PageUp'), true, true, true), { action: 'edge', delta: -1 });
   // Previews off in Settings: the key keeps its native meaning.
   assert.deepEqual(pagePlan(pageDirection('PageDown'), true, false, false), { action: 'none', delta: 1 });
   assert.deepEqual(pagePlan(0, true, true, false), { action: 'none', delta: 0 });
@@ -373,3 +376,61 @@ test('loading counts prompts the same way the list does, and never double-loads 
   assert.equal(sessions.loads, 2, 'it pulls the page that holds the new prompt, then stops');
 });
 
+
+// The walk `↑` / `↓` takes without the search panel: a shell history.
+test('↑ and ↓ wrap around the walk, and ↓ past the newest entry returns to the draft', () => {
+  // Three prompts, index 2 is the newest.
+  assert.equal(stepIndex(2, -1, 3), 1, '↑ from the newest goes older');
+  assert.equal(stepIndex(1, -1, 3), 0);
+  assert.equal(stepIndex(0, -1, 3), 2, '↑ from the oldest wraps to the newest');
+  assert.equal(stepIndex(2, 1, 3), -1, '↓ past the newest returns to the draft');
+  assert.equal(stepIndex(-1, -1, 3), 2, 'from the draft, ↑ starts at the newest');
+  assert.equal(stepIndex(-1, 1, 3), 0, 'from the draft, ↓ starts at the oldest');
+  assert.equal(stepIndex(0, 1, 3), 1);
+  assert.equal(stepIndex(1, 1, 3), 2);
+  assert.equal(stepIndex(2, 1, 3), -1);
+  assert.equal(stepIndex(0, -1, 1), 0, 'a single prompt wraps onto itself');
+  assert.equal(stepIndex(0, 1, 1), -1);
+  assert.equal(stepIndex(5, -1, 0), -1, 'an empty history never moves');
+});
+
+/** A sessions face whose event window holds only what the test seeded. */
+function historyFace(messages) {
+  const entries = messages.map((message, seq) => ({
+    type: 'event',
+    event: message.role === 'user'
+      ? { type: 'user/message', seq, data: { source: { kind: 'user' }, content: [{ type: 'text', text: message.text }] } }
+      : { type: 'assistant/message', seq, data: { message: { content: [{ type: 'text', text: message.text }] } } },
+  }));
+  return {
+    binding: () => ({
+      eventSource: { getSnapshot: () => ({ hasMore: false, entries }), subscribe: () => () => {} },
+      session: null,
+    }),
+  };
+}
+
+test('each prompt carries the reply that followed it, and only up to the next prompt', () => {
+  const face = historyFace([
+    { role: 'user', text: 'first prompt' },
+    { role: 'assistant', text: 'first reply' },
+    { role: 'assistant', text: 'second block of the first reply' },
+    { role: 'user', text: 'second prompt' },
+    { role: 'assistant', text: 'second reply' },
+  ]);
+  const history = readHistory(face, 's1');
+  assert.equal(history.length, 2);
+  assert.equal(history[0].replyLower, 'first reply\n\nsecond block of the first reply');
+  assert.equal(history[1].replyLower, 'second reply');
+});
+
+test('a prompt with no reply yet carries an empty replyLower, never a neighbour', () => {
+  const face = historyFace([
+    { role: 'user', text: 'answered' },
+    { role: 'assistant', text: 'an answer' },
+    { role: 'user', text: 'still waiting' },
+  ]);
+  const history = readHistory(face, 's1');
+  assert.equal(history[1].lower, 'still waiting');
+  assert.equal(history[1].replyLower, '');
+});

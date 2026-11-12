@@ -69,6 +69,7 @@ window.__ModuleLoader__.load({
       hintHidePreview: 'hide',
       hintTypeSpace: 'type space',
       hintPage: 'page',
+      answerHit: 'reply match',
       hintWheel: 'scroll',
       hintInsert: 'insert',
       hintClose: 'cancel',
@@ -104,6 +105,8 @@ window.__ModuleLoader__.load({
           sectionBehavior: '行为',
           showPreviewLabel: '显示回答预览',
           showPreviewHint: '在搜索面板中按空格预览该提示词得到的回答。',
+          searchAnswersLabel: '同时搜索回答',
+          searchAnswersHint: '搜索关键词时也匹配 dsh 的回答；列表仍显示你的提问，命中的行会标出「回答命中」。',
           smoothScrollLabel: '平滑翻页',
           smoothScrollHint: 'PgUp / PgDn 平滑滚动预览，而不是直接跳动。已为减少动态效果的系统强制关闭。',
           previewPageSizeLabel: '每页滚动距离',
@@ -147,6 +150,8 @@ window.__ModuleLoader__.load({
         sectionBehavior: 'Behavior',
         showPreviewLabel: 'Show reply preview',
         showPreviewHint: 'Let Space reveal the reply that prompt received inside the search panel.',
+        searchAnswersLabel: 'Also search replies',
+        searchAnswersHint: 'Match the query against dsh\'s replies too. The list still shows your prompts; a row matched through its reply is marked "reply match".',
         smoothScrollLabel: 'Smooth paging',
         smoothScrollHint: 'Let PgUp / PgDn glide through the preview instead of jumping. Systems that ask for reduced motion always jump.',
         previewPageSizeLabel: 'Page distance',
@@ -196,6 +201,7 @@ window.__ModuleLoader__.load({
         hintHidePreview: '收起',
         hintTypeSpace: '输入空格',
         hintPage: '翻页',
+        answerHit: '回答命中',
         hintWheel: '滚动',
         hintInsert: '填入',
         hintClose: '取消',
@@ -329,6 +335,7 @@ window.__ModuleLoader__.load({
 .dsh-pp-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-pp-row[data-active="true"]{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,var(--dsw-alias-bg-layer-2))}
 .dsh-pp-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
+.dsh-pp-row__hit{margin-left:8px;padding:0 6px;border-radius:5px;font-size:11px;line-height:18px;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}
 .dsh-pp-mark{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .dsh-pp-empty{padding:12px 8px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dsh-pp-preview{flex:0 1 auto;min-height:0;max-height:min(46vh,320px);overflow-y:auto;overscroll-behavior:contain;border-top:0.5px solid var(--dsw-alias-border-l1);margin-top:1px;padding:8px 4px 2px 2px}
@@ -615,33 +622,82 @@ window.__ModuleLoader__.load({
      * - previews turned off in Settings: `none`, the key keeps its native meaning;
      * - no preview shown yet: `open` it, then page it once the scroller exists;
      * - room left in the travel direction: `scroll` one page;
-     * - already at that edge: `step` the selection one row, instead of leaving
-     *   the key to the chat viewport, which reads as "no response".
+     * - already at that edge: `edge`, the press is swallowed and stops there.
+     *   Paging never moves the selection, so reading one reply never spills
+     *   into the next prompt.
      *
      * @param {number} delta -1 for PgUp, 1 for PgDn, 0 for any other key
      * @param {boolean} previewVisible
      * @param {boolean} allowPreview
      * @param {boolean} atEdge
-     * @returns {{ action: 'scroll' | 'open' | 'step' | 'none', delta: number }}
+     * @returns {{ action: 'scroll' | 'open' | 'edge' | 'none', delta: number }}
      */
     function pagePlan(delta, previewVisible, allowPreview, atEdge) {
       if (delta === 0 || !allowPreview) return { action: 'none', delta };
       if (!previewVisible) return { action: 'open', delta };
-      if (atEdge) return { action: 'step', delta };
+      if (atEdge) return { action: 'edge', delta };
       return { action: 'scroll', delta };
+    }
+
+    /**
+     * The index `↑` / `↓` moves to while browsing without the search panel: a
+     * shell history walk. `-1` steps to the newer entry, `1` to the older one,
+     * and both wrap around, so holding a key revisits every prompt forever.
+     * `view` is the entry currently shown, or `-1` for the composer draft.
+     *
+     * @param {number} view
+     * @param {number} delta -1 for `↑` (older), 1 for `↓` (newer)
+     * @param {number} total
+     * @returns {number} the next entry, or `-1` when stepping back onto the draft
+     */
+    function stepIndex(view, delta, total) {
+      if (total <= 0) return -1;
+      if (view < 0) return delta === -1 ? total - 1 : 0;
+      const next = view + delta;
+      if (next < 0) return total - 1;
+      if (next >= total) return -1;
+      return next;
     }
 
     /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
     function readHistory(sessions, sessionId) {
+      const messages = readMessages(sessions, sessionId).messages;
       const history = [];
       let previousText = null;
-      for (const message of readMessages(sessions, sessionId).messages) {
+      for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
         if (message.role !== 'user') continue;
         if (message.text === previousText) continue;
         previousText = message.text;
-        history.push({ key: 'h-' + String(message.seq), seq: message.seq, text: message.text, lower: message.text.toLowerCase() });
+        history.push({
+          key: 'h-' + String(message.seq),
+          seq: message.seq,
+          text: message.text,
+          lower: message.text.toLowerCase(),
+          // The reply this prompt produced, lower-cased for the optional
+          // answer search. Only the assistant text blocks, up to the next
+          // human message — tool calls and reasoning are not in `readMessages`.
+          replyLower: replyTexts(messages, index).join('\n\n').toLowerCase(),
+        });
       }
       return limitHistory(history, MAX_HISTORY);
+    }
+
+    /**
+     * The assistant texts that sit after the human message at `start`, up to the
+     * next human message: the whole reply, before the preview trims it.
+     * @param {ReadonlyArray<{ role: string, text: string }>} messages
+     * @param {number} start index of the human message
+     * @returns {string[]}
+     */
+    function replyTexts(messages, start) {
+      const texts = [];
+      for (let index = start + 1; index < messages.length && texts.length < 200; index += 1) {
+        const message = messages[index];
+        if (message.role === 'user') break;
+        texts.push(message.text);
+      }
+      return texts;
     }
 
     /**
@@ -661,12 +717,7 @@ window.__ModuleLoader__.load({
       const start = messages.findIndex((message) => message.role === 'user'
         && (message.seq === seq || (hold !== null && hold !== undefined && message.text === hold.text)));
       if (start < 0) return null;
-      const texts = [];
-      for (let index = start + 1; index < messages.length && texts.length < 200; index += 1) {
-        const message = messages[index];
-        if (message.role === 'user') break;
-        texts.push(message.text);
-      }
+      const texts = replyTexts(messages, start);
       if (texts.length === 0) return null;
       const chosen = [];
       let length = 0;
@@ -1208,6 +1259,7 @@ window.__ModuleLoader__.load({
       const DEFAULTS = {
         locale: 'auto',
         showPreview: true,
+        searchAnswers: false,
         smoothScroll: true,
         previewPageSize: PREVIEW_PAGE,
         historyLimit: 300,
@@ -1504,6 +1556,7 @@ window.__ModuleLoader__.load({
           group(t('sectionLanguage'), [languageRow()]),
           group(t('sectionBehavior'), [
             switchRow(t('showPreviewLabel'), t('showPreviewHint'), baseline.showPreview !== false, (value) => update('showPreview', value)),
+            switchRow(t('searchAnswersLabel'), t('searchAnswersHint'), baseline.searchAnswers === true, (value) => update('searchAnswers', value)),
             switchRow(t('smoothScrollLabel'), t('smoothScrollHint'), baseline.smoothScroll !== false, (value) => update('smoothScroll', value)),
             rangeRow('previewPageSize'),
             rangeRow('historyLimit'),
@@ -1557,6 +1610,8 @@ window.__ModuleLoader__.load({
         localeFace,
         pageDirection,
         pagePlan,
+        stepIndex,
+        readHistory,
         promptCount,
         loadHistory,
         glideFrame,
@@ -1646,6 +1701,7 @@ window.__ModuleLoader__.load({
               return {
                 locale: value('locale') ?? 'auto',
                 showPreview: value('showPreview') !== false,
+                searchAnswers: value('searchAnswers') === true,
                 smoothScroll: value('smoothScroll') !== false,
                 previewPageSize: value('previewPageSize') ?? PREVIEW_PAGE,
                 historyLimit: value('historyLimit') ?? MAX_HISTORY,
@@ -1812,12 +1868,17 @@ window.__ModuleLoader__.load({
             }
           };
 
-          const exitBrowse = (restore) => {
+          /**
+           * Leave the history walk. The draft the composer held when the walk
+           * began always comes back, whichever way the walk ends — `Esc`, a
+           * click back into the composer, typing, or `↓` past the newest entry.
+           */
+          const exitBrowse = () => {
             const mode = modeRef.current;
             if (mode === null) return;
             modeRef.current = null;
             setBrowse(null);
-            if (restore) writeDraft(mode.stash);
+            writeDraft(mode.stash);
           };
 
           const beginBrowse = (history) => {
@@ -1828,13 +1889,17 @@ window.__ModuleLoader__.load({
             setBrowse({ index, total: history.length });
           };
 
+          /**
+           * One `↑` (delta -1, older) or `↓` (delta 1, newer). Both directions
+           * wrap like a shell history; stepping newer past the newest entry
+           * returns to the draft the walk started from.
+           */
           const stepBrowse = (delta) => {
             const mode = modeRef.current;
             if (mode === null) return;
-            const next = mode.index + delta;
-            if (next < 0) return;
-            if (next >= mode.items.length) {
-              exitBrowse(true);
+            const next = stepIndex(mode.index, delta, mode.items.length);
+            if (next === -1) {
+              exitBrowse();
               return;
             }
             mode.index = next;
@@ -1911,6 +1976,8 @@ window.__ModuleLoader__.load({
 
           const queryText = panel === null ? '' : panel.query;
           const order = readNow('browseOrder') === 'oldest' ? 'oldest' : 'newest';
+          // «同时搜索回答»: off by default, the query only filters prompts.
+          const searchAnswers = readNow('searchAnswers') === true;
           const matches = React.useMemo(() => {
             if (panel === null) return EMPTY;
             const query = queryText.trim().toLowerCase();
@@ -1918,10 +1985,18 @@ window.__ModuleLoader__.load({
             const source = order === 'oldest' ? items : items.slice().reverse();
             for (let index = 0; index < source.length && found.length < MAX_RESULTS; index += 1) {
               const item = source[index];
-              if (query === '' || item.lower.indexOf(query) >= 0) found.push(item);
+              if (query === '') {
+                found.push({ ...item, answerHit: false });
+                continue;
+              }
+              if (item.lower.indexOf(query) >= 0) {
+                found.push({ ...item, answerHit: false });
+                continue;
+              }
+              if (searchAnswers && item.replyLower.indexOf(query) >= 0) found.push({ ...item, answerHit: true });
             }
             return found;
-          }, [panel, queryText, items, order]);
+          }, [panel, queryText, items, order, searchAnswers]);
           matchesRef.current = matches;
           const selected = matches.length === 0 ? 0 : Math.min(panel.selected, matches.length - 1);
           const codeLabels = React.useMemo(() => ({
@@ -1963,14 +2038,14 @@ window.__ModuleLoader__.load({
               return;
             }
             if (event.altKey) {
-              exitBrowse(false);
+              exitBrowse();
               return;
             }
             if (modeRef.current !== null) {
               if (key === 'Escape') {
                 event.preventDefault();
                 event.stopPropagation();
-                exitBrowse(false);
+                exitBrowse();
                 return;
               }
               if (key === 'ArrowUp' || key === 'ArrowDown') {
@@ -1982,13 +2057,15 @@ window.__ModuleLoader__.load({
               if (pageDirection(key) !== 0) {
                 // Paging the reply preview while browsing: the preview is not
                 // open yet, so the press opens it for the browsed prompt instead
-                // of scrolling the chat behind the composer.
+                // of scrolling the chat behind the composer. The walk ends
+                // first so the stashed draft survives, as on any other exit.
                 event.preventDefault();
                 event.stopPropagation();
+                exitBrowse();
                 openSearch();
                 return;
               }
-              if (!modifier && key !== 'Shift' && key !== 'Control' && key !== 'Meta' && key !== 'Alt') exitBrowse(false);
+              if (!modifier && key !== 'Shift' && key !== 'Control' && key !== 'Meta' && key !== 'Alt') exitBrowse();
               return;
             }
             if (pageDirection(key) !== 0 && !modifier) {
@@ -2004,7 +2081,10 @@ window.__ModuleLoader__.load({
               }
               return;
             }
-            if (!modifier && !event.shiftKey && key === 'ArrowUp' && phaseRef.current === 'plain' && draftRef.current.trim() === '') {
+            // `↑` walks the history even when the composer already holds a
+            // draft: the draft is stashed and comes back on exit. A non-plain
+            // composer (an open slash menu, an approval card) keeps its own ↑.
+            if (!modifier && !event.shiftKey && key === 'ArrowUp' && phaseRef.current === 'plain') {
               const history = historyNow();
               growHistory();
               browsePending.current = history.length === 0;
@@ -2023,7 +2103,7 @@ window.__ModuleLoader__.load({
               closeSearch(false);
               return;
             }
-            exitBrowse(false);
+            exitBrowse();
           };
 
           React.useEffect(() => {
@@ -2246,23 +2326,6 @@ window.__ModuleLoader__.load({
           };
 
           /**
-           * Move the selected row by one, clamped. Returns whether there is
-           * anywhere to go, so the key is only swallowed when it does something.
-           */
-          const stepSelection = (delta) => {
-            const count = matchesRef.current.length;
-            if (count === 0) return false;
-            const current = panel === null ? 0 : Math.min(panel.selected, count - 1);
-            if (current + delta < 0 || current + delta > count - 1) return false;
-            setPanel((previous) => {
-              if (previous === null) return previous;
-              const next = Math.max(0, Math.min(count - 1, previous.selected + delta));
-              return next === previous.selected ? previous : { query: previous.query, selected: next };
-            });
-            return true;
-          };
-
-          /**
            * One `PgUp` / `PgDn` press while the search panel is open. Returns
            * whether the press was handled, so the caller only prevents the
            * default when the panel actually did something with it.
@@ -2280,10 +2343,12 @@ window.__ModuleLoader__.load({
               setPreviewOpen(true);
               return true;
             }
-            // Swallow the key even when it merely moves the selection: PgUp /
-            // PgDn belong to the panel, never to the transcript behind it.
-            if (plan.action === 'scroll' && scrollPreviewBy(delta * pager.page, repeat, true)) return true;
-            stepSelection(delta);
+            // Swallow the key either way: PgUp / PgDn belong to the panel,
+            // never to the transcript behind it. At the edge the press stops
+            // there instead of moving to the next prompt — paging one reply
+            // never spills over into another.
+            if (plan.action === 'edge') return true;
+            scrollPreviewBy(delta * pager.page, repeat, true);
             return true;
           };
 
@@ -2434,7 +2499,11 @@ window.__ModuleLoader__.load({
             title: previewOf(item.text),
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => accept(item),
-          }, highlight(item.text, queryText.trim().toLowerCase()));
+          },
+          highlight(item.text, queryText.trim().toLowerCase()),
+          item.answerHit === true
+            ? h('span', { key: 'answer-hit', className: 'dsh-pp-row__hit' }, translate('answerHit'))
+            : null);
 
           if (!dataReady) return h('div', { ref: rootRef, style: { display: 'none' }, 'data-dsh-prompt-peek': '' });
           return h('div', { ref: rootRef, style: ROOT_STYLE, 'data-dsh-prompt-peek': '' },
