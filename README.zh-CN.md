@@ -122,7 +122,7 @@ dsh-prompt-peek/
 2. 修改 `src/client.js`。
 3. 重新加载客户端模块：在 Plugins 页面禁用再启用该 bundle（推荐 HMR），或在宿主无法重新组合时刷新页面 / 重启 DSH。
 
-- `npm test` 运行宿主侧设置测试（`test/settings.test.mjs`，基于 `node:test`）：校验、落盘、重置、坏文件回退。测试使用临时 `DSH_HOME`，不碰真实数据。同时运行 `test/client.test.mjs`：用 `vm` 在无浏览器环境加载客户端工厂，检查它导出的纯函数——语言解析、按键决策、以及逐帧模拟预览翻页。
+- `npm test` 运行宿主侧设置测试（`test/settings.test.mjs`，基于 `node:test`）：校验、落盘、重置、坏文件回退。测试使用临时 `DSH_HOME`，不碰真实数据。同时运行 `test/client.test.mjs`：用 `vm` 在无浏览器环境加载客户端工厂，检查它导出的纯函数——语言解析、`Ctrl+R` 的归属判定、历史翻看的草稿存取、提问/回答过滤、只取文字的消息扫描，以及逐帧模拟预览翻页。
 - `npm run check` 对两个入口执行 `node --check`。
 - 客户端改动需要刷新页面或禁用再启用 bundle；宿主改动需要重启 DSH。
 - 修改 `glideStep`、`glideFrame`、`pagePlan` 或 `translateKey` 之前，先读 [docs/REGRESSIONS.md](docs/REGRESSIONS.md)，并按里面的方法做反向验证：把旧代码放回去，确认对应测试会失败。

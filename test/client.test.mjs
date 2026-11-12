@@ -37,8 +37,22 @@ const {
   glideFrame,
   glideStep,
   stepIndex,
+  browseStep: browseStepOf,
+  filterHistory: filterHistoryOf,
+  ownsComposerKey,
+  readMessages,
   readHistory,
 } = loadClient();
+
+/** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
+const browseStep = (mode, delta) => {
+  const result = browseStepOf(mode, delta);
+  return {
+    ...result,
+    mode: result.mode === null ? null : { ...result.mode },
+  };
+};
+const filterHistory = (items, query, options) => filterHistoryOf(items, query, options).map((item) => ({ ...item }));
 
 /** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
 const pagePlan = (...args) => ({ ...pagePlanOf(...args) });
@@ -433,4 +447,142 @@ test('a prompt with no reply yet carries an empty replyLower, never a neighbour'
   const history = readHistory(face, 's1');
   assert.equal(history[1].lower, 'still waiting');
   assert.equal(history[1].replyLower, '');
+});
+
+// The walk's stashing rule, on the reducer itself: every way out returns the
+// draft the composer held when the walk began.
+const walkItems = [{ text: 'alpha' }, { text: 'beta' }, { text: 'gamma' }];
+const started = (stash) => browseStep({ items: walkItems, index: -1, stash }, -1);
+
+test('↑ from the draft opens the newest prompt and keeps the draft safe', () => {
+  const first = started('my unsent draft');
+  assert.equal(first.draft, 'gamma');
+  assert.equal(first.mode.index, 2);
+  assert.equal(first.mode.stash, 'my unsent draft');
+});
+
+test('every way out of the walk writes the stashed draft back', () => {
+  const first = started('my unsent draft');
+  // `Esc`, a click into the composer, and typing all leave with delta 0.
+  const left = browseStep(first.mode, 0);
+  assert.equal(left.mode, null);
+  assert.equal(left.draft, 'my unsent draft');
+  // `↓` past the newest entry leaves the same way.
+  const older = browseStep(first.mode, -1);
+  assert.equal(older.draft, 'beta');
+  const wrapped = browseStep(browseStep(older.mode, -1).mode, -1);
+  assert.equal(wrapped.draft, 'gamma');
+  const past = browseStep(wrapped.mode, 1);
+  assert.equal(past.mode, null);
+  assert.equal(past.draft, 'my unsent draft');
+  // `↑` wraps from the oldest back to the newest and never drops the stash.
+  assert.equal(browseStep(older.mode, -1).mode.stash, 'my unsent draft');
+});
+
+test('a walk over an empty composer restores an empty draft, not a prompt', () => {
+  const first = started('');
+  const left = browseStep(first.mode, 0);
+  assert.equal(left.draft, '');
+});
+
+test('walking with duplicates of the draft still restores exactly what was typed', () => {
+  const items = [{ text: 'same' }, { text: 'other' }];
+  const first = browseStep({ items, index: -1, stash: 'same' }, -1);
+  assert.equal(first.draft, 'other');
+  assert.equal(browseStep(first.mode, 0).draft, 'same');
+});
+
+test('Ctrl+R / Cmd+R belong to the composer only in its plain form', () => {
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true }), 'open-search');
+  assert.equal(ownsComposerKey({ key: 'R', ctrlKey: true }), 'open-search');
+  assert.equal(ownsComposerKey({ key: 'r', metaKey: true }), 'open-search');
+  // Another key, or another modifier riding along, is not the search shortcut.
+  assert.equal(ownsComposerKey({ key: 'a', ctrlKey: true }), null);
+  assert.equal(ownsComposerKey({ key: 'r' }), null);
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, shiftKey: true }), null);
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, altKey: true }), null);
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, metaKey: true }), null);
+  // An IME composition or an already-consumed press keeps its own meaning.
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, isComposing: true }), null);
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, keyCode: 229 }), null);
+  assert.equal(ownsComposerKey({ key: 'r', ctrlKey: true, defaultPrevented: true }), null);
+});
+
+const historyRows = [
+  { text: 'fix the parser', lower: 'fix the parser', replyLower: 'the parser is fixed; run npm test' },
+  { text: 'why is the build slow', lower: 'why is the build slow', replyLower: 'the cache layer misses' },
+  { text: 'add a changelog entry', lower: 'add a changelog entry', replyLower: '' },
+];
+
+test('the query matches prompts only until "also search replies" is on', () => {
+  // "cache" only appears in a reply; "parser" in a prompt and its reply.
+  const texts = (rows) => [...rows.map((row) => row.text)];
+  assert.deepEqual(texts(filterHistory(historyRows, 'cache')), []);
+  assert.deepEqual(texts(filterHistory(historyRows, 'cache', { searchAnswers: true })), ['why is the build slow']);
+  // A prompt match stays a prompt match, not an answer hit.
+  const byPrompt = filterHistory(historyRows, 'parser', { searchAnswers: true });
+  assert.deepEqual([...byPrompt.map((row) => [row.text, row.answerHit])], [['fix the parser', false]]);
+  // Found only through the reply: marked, and only then.
+  assert.deepEqual([...filterHistory(historyRows, 'cache', { searchAnswers: true }).map((row) => row.answerHit)], [true]);
+});
+
+test('the query is trimmed and case-insensitive, and an empty query lists everything', () => {
+  const texts = (rows) => [...rows.map((row) => row.text)];
+  assert.deepEqual(texts(filterHistory(historyRows, '  CHANGELOG ')), ['add a changelog entry']);
+  assert.deepEqual(texts(filterHistory(historyRows, 'CACHE', { searchAnswers: true })), ['why is the build slow']);
+  const all = filterHistory(historyRows, '');
+  assert.equal(all.length, 3);
+  assert.ok(all.every((row) => row.answerHit === false));
+});
+
+test('result order and the result cap apply before matching, as the panel lists them', () => {
+  const texts = (rows) => [...rows.map((row) => row.text)];
+  assert.deepEqual(texts(filterHistory(historyRows, '', { order: 'newest' })), ['add a changelog entry', 'why is the build slow', 'fix the parser']);
+  assert.deepEqual(texts(filterHistory(historyRows, '', { order: 'oldest' })), ['fix the parser', 'why is the build slow', 'add a changelog entry']);
+  assert.equal(filterHistory(historyRows, '', { limit: 2 }).length, 2);
+});
+
+test('a prompt without a reply can never match through the answer search', () => {
+  const rows = [{ text: 'no reply', lower: 'no reply', replyLower: '' }];
+  assert.equal(filterHistory(rows, 'anything', { searchAnswers: true }).length, 0);
+});
+
+test('tool calls and reasoning never reach the history, the preview, or the answer search', () => {
+  // One human message, then an assistant message that mixes a text block with
+  // a tool call and a reasoning block, the way the Host records them.
+  const entries = [
+    {
+      type: 'event',
+      event: { type: 'user/message', seq: 1, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'deploy it' }] } },
+    },
+    {
+      type: 'event',
+      event: {
+        type: 'assistant/message',
+        seq: 2,
+        data: {
+          message: {
+            content: [
+              { type: 'reasoning', text: 'SECRET-REASONING' },
+              { type: 'tool-call', name: 'run', input: { command: 'SECRET-TOOL-COMMAND' } },
+              { type: 'text', text: 'Deployed to staging.' },
+            ],
+          },
+        },
+      },
+    },
+  ];
+  const face = {
+    binding: () => ({
+      eventSource: { getSnapshot: () => ({ hasMore: false, entries }), subscribe: () => () => {} },
+      session: null,
+    }),
+  };
+  const { messages } = readMessages(face, 's1');
+  assert.deepEqual([...messages.map((message) => message.text)], ['deploy it', 'Deployed to staging.']);
+  const rows = readHistory(face, 's1');
+  assert.equal(rows[0].replyLower, 'deployed to staging.');
+  assert.equal(filterHistory(rows, 'secret', { searchAnswers: true }).length, 0);
+  assert.equal(filterHistory(rows, 'secret-tool', { searchAnswers: true }).length, 0);
+  assert.deepEqual([...filterHistory(rows, 'staging', { searchAnswers: true }).map((row) => row.answerHit)], [true]);
 });

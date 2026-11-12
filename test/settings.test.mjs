@@ -227,3 +227,29 @@ test('the reply preview shares one parser with the history and survives interlea
   const replyBody = source.slice(readReply, source.indexOf('/** First match highlighted', readReply));
   assert.doesNotMatch(replyBody, /surfaceOp !== 'append'/u);
 });
+
+test('the composer handler checks focus before it asks who owns the key', () => {
+  // `ownsComposerKey` is a pure decision; this guard keeps the component from
+  // calling it on a key that happened outside the editor, which would hijack
+  // Ctrl+R / Cmd+R for the whole page.
+  const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
+  const handler = source.indexOf('handlerRef.current = (event) => {');
+  assert.ok(handler > 0);
+  const body = source.slice(handler, source.indexOf('pointerRef.current', handler));
+  const focusGuard = body.indexOf('editor.contains(event.target)');
+  const ownership = body.indexOf("ownsComposerKey(event) === 'open-search'");
+  assert.ok(focusGuard > 0, 'the handler still requires the event to come from the editor');
+  assert.ok(ownership > focusGuard, 'ownership is asked only after the focus guard');
+  // No second, inline copy of the shortcut test.
+  assert.doesNotMatch(body, /key === 'r' \|\| key === 'R'/u);
+});
+
+test('the component drives the walk and the filter through their pure helpers', () => {
+  const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
+  // One reducer decides what the composer holds on every step and exit.
+  assert.match(source, /const exitBrowse = \(\) => \{[\s\S]*?browseStep\(mode, 0\)/u);
+  assert.match(source, /const stepBrowse = \(delta\) => \{[\s\S]*?browseStep\(mode, delta\)/u);
+  // The panel renders rows from `filterHistory`, not from an inline loop.
+  assert.match(source, /filterHistory\(items, queryText,/u);
+  assert.doesNotMatch(source, /let index = 0; index < source\.length && found\.length < MAX_RESULTS/u);
+});

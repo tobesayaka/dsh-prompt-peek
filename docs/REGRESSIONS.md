@@ -182,12 +182,15 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 | `promptCount` / `loadHistory` | R5：补页循环的停止条件与计数口径 |
 | `glideFrame` / `glideStep` | R3：每帧步长的符号与距离 |
 | `stepIndex` | R6：`↑` / `↓` 的循环与回到草稿 |
-| `readHistory` | 「同时搜索回答」：每条提问附带它之后、下一条提问之前的回答文本 |
+| `readHistory` / `readMessages` | 「同时搜索回答」：每条提问附带它之后、下一条提问之前的回答文本；工具调用与 reasoning 不进入结果 |
+| `browseStep` | 翻看状态的草稿存取：每一条退出路径都写回原草稿 |
+| `filterHistory` | 搜索过滤：默认只搜提问；开关打开后也搜回答，且只有回答命中才标 `answerHit` |
+| `ownsComposerKey` | `Ctrl+R` / `Cmd+R` 的归属判定（纯函数；组件另有一条源码守卫，确保先检查焦点） |
 
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 30 个测试（宿主 10 + 客户端 20）
+npm test          # 42 个测试（宿主 13 + 客户端 29）
 npm run check     # node --check
 ```
 
@@ -206,3 +209,8 @@ R1 同理：把 `translateKey` 的 `own`（回退表）改回固定 `composerDic
 
 R6 / R7 的反向验证：把 `stepIndex` 的越界返回值改回 `0`、把 `pagePlan` 的 `edge` 改回 `scroll`，
 新增的两条测试必须失败；换回来必须全部通过（0.4.0 发布前照此验过）。
+
+清单之外还补了两条源码级守卫（`test/settings.test.mjs`）：组件必须先确认按键发生在
+输入框里才问 `ownsComposerKey`（否则会劫持整页的 `Ctrl+R`），以及翻看 / 过滤必须走
+`browseStep` / `filterHistory`，而不是各写一份内联循环。反向验证：把 `ownsComposerKey`
+判定换回内联写法、把 `browseStep` 的退出草稿改成空串，对应测试都会失败。

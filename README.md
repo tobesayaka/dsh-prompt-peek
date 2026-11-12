@@ -124,7 +124,7 @@ dsh-prompt-peek/
 2. Edit `src/client.js`.
 3. Reload the client module: disable and re-enable the bundle in the Plugins page (HMR recommends it), or reload the page / restart DSH when the host cannot recompose.
 
-- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one. It also runs `test/client.test.mjs`, which loads the client factory in a `vm` sandbox (no browser) and checks the pure helpers it returns: language resolution, key routing, and a frame-by-frame simulation of the preview glide.
+- `npm test` runs the Host settings tests (`test/settings.test.mjs`, `node:test`): validation, persistence, reset, and the malformed-file fallbacks. The tests use a temporary `DSH_HOME`, never the real one. It also runs `test/client.test.mjs`, which loads the client factory in a `vm` sandbox (no browser) and checks the pure helpers it returns: language resolution, the `Ctrl+R` ownership rule, the history walk's draft stashing, prompt/reply filtering, the text-only message scan, and a frame-by-frame simulation of the preview glide.
 - `npm run check` runs `node --check` over both entry points.
 - Client changes need a page reload or a disable/enable of the bundle; Host changes need a DSH restart.
 - Before changing `glideStep`, `glideFrame`, `pagePlan`, or `translateKey`, read [docs/REGRESSIONS.md](docs/REGRESSIONS.md) and run its reverse checks: put the old code back and watch the named tests fail.

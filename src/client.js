@@ -659,6 +659,85 @@ window.__ModuleLoader__.load({
       return next;
     }
 
+    /**
+     * Which composer action a key event belongs to, decided without the DOM so
+     * the boundary can be tested: `open-search` for `Ctrl+R` / `Cmd+R`, and
+     * `null` for everything else. The caller only asks this after checking that
+     * the key happened inside the composer's editor, so plain `Ctrl+R` in the
+     * page at large still refreshes the browser.
+     *
+     * Modifiers other than the one carrier (`Shift`, `Alt`) or a second
+     * `Ctrl`/`Meta` make it "not ours", as does an IME composition and a key
+     * the page already consumed.
+     *
+     * @param {{ key?: string, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean, shiftKey?: boolean,
+     *   defaultPrevented?: boolean, isComposing?: boolean, keyCode?: number }} event
+     * @returns {'open-search' | null}
+     */
+    function ownsComposerKey(event) {
+      if (event === null || event === undefined) return null;
+      if (event.defaultPrevented === true || event.isComposing === true || event.keyCode === 229) return null;
+      const key = typeof event.key === 'string' ? event.key : '';
+      const carrier = event.metaKey === true ? 'meta' : 'ctrl';
+      const other = event.metaKey === true && event.ctrlKey === true;
+      if (other || event.altKey === true || event.shiftKey === true) return null;
+      if ((carrier === 'meta' ? event.metaKey !== true : event.ctrlKey !== true)) return null;
+      return key === 'r' || key === 'R' ? 'open-search' : null;
+    }
+
+    /**
+     * The rows the search panel lists, with no DOM or React. `query` filters on
+     * the prompt text; `searchAnswers` lets it also match the reply that
+     * followed the prompt (this prompt up to the next human message). A row is
+     * marked `answerHit` only when the prompt itself did not match, so the
+     * badge always means "found through the reply".
+     *
+     * An empty query lists everything, oldest or newest first per `order`.
+     *
+     * @param {ReadonlyArray<{ lower: string, replyLower: string }>} items oldest first
+     * @param {string} query raw query, trimmed and lower-cased here
+     * @param {{ order?: 'newest' | 'oldest', searchAnswers?: boolean, limit?: number }} [options]
+     * @returns {Array<any>}
+     */
+    function filterHistory(items, query, options = {}) {
+      const needle = String(query === null || query === undefined ? '' : query).trim().toLowerCase();
+      const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : items.length;
+      const searchAnswers = options.searchAnswers === true;
+      const source = options.order === 'oldest' ? items : items.slice().reverse();
+      const found = [];
+      for (let index = 0; index < source.length && found.length < limit; index += 1) {
+        const item = source[index];
+        if (needle === '' || item.lower.indexOf(needle) >= 0) {
+          found.push({ ...item, answerHit: false });
+          continue;
+        }
+        if (searchAnswers && String(item.replyLower ?? '').indexOf(needle) >= 0) found.push({ ...item, answerHit: true });
+      }
+      return found;
+    }
+
+    /**
+     * One step of the history walk, with no DOM or React: `mode` is
+     * `{ items, index, stash }` and `delta` is -1 for `↑`, 1 for `↓`, 0 to
+     * leave the walk. Returns the next `mode` (`null` once the walk ends, so the
+     * caller can write the walk back to the composer) and the draft the
+     * composer must show.
+     *
+     * The stash — whatever the composer held when the walk began — is written
+     * back on **every** exit path: leaving explicitly (`delta` 0) and stepping
+     * newer past the newest entry both return it.
+     *
+     * @param {{ items: ReadonlyArray<{ text: string }>, index: number, stash: string }} mode
+     * @param {number} delta
+     * @returns {{ mode: { items: any, index: number, stash: string } | null, draft: string }}
+     */
+    function browseStep(mode, delta) {
+      if (delta === 0) return { mode: null, draft: mode.stash };
+      const next = stepIndex(mode.index, delta, mode.items.length);
+      if (next === -1) return { mode: null, draft: mode.stash };
+      return { mode: { items: mode.items, index: next, stash: mode.stash }, draft: mode.items[next].text };
+    }
+
     /** Human messages actually sent in this session, oldest first, consecutive duplicates folded. */
     function readHistory(sessions, sessionId) {
       const messages = readMessages(sessions, sessionId).messages;
@@ -1611,6 +1690,10 @@ window.__ModuleLoader__.load({
         pageDirection,
         pagePlan,
         stepIndex,
+        browseStep,
+        filterHistory,
+        ownsComposerKey,
+        readMessages,
         readHistory,
         promptCount,
         loadHistory,
@@ -1872,21 +1955,25 @@ window.__ModuleLoader__.load({
            * Leave the history walk. The draft the composer held when the walk
            * began always comes back, whichever way the walk ends — `Esc`, a
            * click back into the composer, typing, or `↓` past the newest entry.
+           * Every exit goes through `browseStep(..., 0)`, so this is the only
+           * place that writes the stash back.
            */
           const exitBrowse = () => {
             const mode = modeRef.current;
             if (mode === null) return;
             modeRef.current = null;
             setBrowse(null);
-            writeDraft(mode.stash);
+            writeDraft(browseStep(mode, 0).draft);
           };
 
           const beginBrowse = (history) => {
             if (history.length === 0) return;
-            const index = history.length - 1;
-            modeRef.current = { items: history, index, stash: draftRef.current };
-            writeDraft(history[index].text);
-            setBrowse({ index, total: history.length });
+            const mode = { items: history, index: -1, stash: draftRef.current };
+            const next = browseStep(mode, -1);
+            if (next.mode === null) return;
+            modeRef.current = next.mode;
+            writeDraft(next.draft);
+            setBrowse({ index: next.mode.index, total: next.mode.items.length });
           };
 
           /**
@@ -1897,14 +1984,16 @@ window.__ModuleLoader__.load({
           const stepBrowse = (delta) => {
             const mode = modeRef.current;
             if (mode === null) return;
-            const next = stepIndex(mode.index, delta, mode.items.length);
-            if (next === -1) {
-              exitBrowse();
+            const next = browseStep(mode, delta);
+            if (next.mode === null) {
+              modeRef.current = null;
+              setBrowse(null);
+              writeDraft(next.draft);
               return;
             }
-            mode.index = next;
-            writeDraft(mode.items[next].text);
-            setBrowse({ index: next, total: mode.items.length });
+            modeRef.current = next.mode;
+            writeDraft(next.draft);
+            setBrowse({ index: next.mode.index, total: next.mode.items.length });
           };
 
           const focusQuery = () => {
@@ -1978,25 +2067,9 @@ window.__ModuleLoader__.load({
           const order = readNow('browseOrder') === 'oldest' ? 'oldest' : 'newest';
           // «同时搜索回答»: off by default, the query only filters prompts.
           const searchAnswers = readNow('searchAnswers') === true;
-          const matches = React.useMemo(() => {
-            if (panel === null) return EMPTY;
-            const query = queryText.trim().toLowerCase();
-            const found = [];
-            const source = order === 'oldest' ? items : items.slice().reverse();
-            for (let index = 0; index < source.length && found.length < MAX_RESULTS; index += 1) {
-              const item = source[index];
-              if (query === '') {
-                found.push({ ...item, answerHit: false });
-                continue;
-              }
-              if (item.lower.indexOf(query) >= 0) {
-                found.push({ ...item, answerHit: false });
-                continue;
-              }
-              if (searchAnswers && item.replyLower.indexOf(query) >= 0) found.push({ ...item, answerHit: true });
-            }
-            return found;
-          }, [panel, queryText, items, order, searchAnswers]);
+          const matches = React.useMemo(() => (panel === null
+            ? EMPTY
+            : filterHistory(items, queryText, { order, searchAnswers, limit: MAX_RESULTS })), [panel, queryText, items, order, searchAnswers]);
           matchesRef.current = matches;
           const selected = matches.length === 0 ? 0 : Math.min(panel.selected, matches.length - 1);
           const codeLabels = React.useMemo(() => ({
@@ -2031,7 +2104,7 @@ window.__ModuleLoader__.load({
             if (panel !== null) return;
             const key = typeof event.key === 'string' ? event.key : '';
             const modifier = event.metaKey || event.ctrlKey;
-            if (modifier && !event.altKey && !event.shiftKey && (key === 'r' || key === 'R')) {
+            if (ownsComposerKey(event) === 'open-search') {
               event.preventDefault();
               event.stopPropagation();
               openSearch();
