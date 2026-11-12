@@ -15,6 +15,7 @@
 | R7 | 回答翻到顶 / 到底后继续按 `PgDn` / `PgUp` 会串到下一条提问 | 0.1.0 | 0.4.0 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
 | R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 未发布 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
 | R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见 | 0.1.0 | 未发布 | `an open reply preview never squeezes the prompt list to nothing (R8)` |
+| R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 未发布 | `the panel glides between replies as a pixel height (R9)`、`the reply preview glides with the panel instead of jumping ahead (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
 | R10 | `Ctrl+R` 完全没有反应（插件整体没挂载）：重复注册同一份 locale 字典时 `apply` 抛错 | 未发布 | 未发布 | `a duplicate locale registration never takes the composer overlay down (R10)` |
 | R11 | 输入框浮层渲染即崩：`Cannot read properties of undefined (reading 'listeners')`，`Ctrl+R` 看起来仍然没反应 | 未发布 | 未发布 | `the locale subscription survives being called without a receiver (R11)` |
 | R12 | 设置里 prompt-peek 页面空白：`ReferenceError: bind is not defined` | 未发布 | 未发布 | `every mounted surface renders without a ReferenceError (R12)` |
@@ -219,6 +220,59 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 这条测试会直接说出是哪一个不满足。该测试的 `CSS` 导出已在 `internals`，供 `test/` 读取。
 
 
+
+---
+
+## R9 — 面板一跳一跳地换高度，预览框不跟着伸缩
+
+### 现象
+
+用 `↑` / `↓` 换回答时：面板高度**瞬间跳变**（一会往上伸、一会缩回去）；后来加了高度过渡，
+又出现新问题——**面板平滑地伸缩了，但里面的预览框不跟着伸缩**，而且快得看不清。
+
+### 根因（两层）
+
+第一层：面板高度完全由内容决定，换回答就是 `auto → auto`，没有任何过渡。
+
+第二层更隐蔽。面板改成由 JS 设定的像素高度后有了 140ms 过渡，但预览仍是：
+
+```css
+.dsh-pp-preview { flex: 0 1 auto; max-height: 40%; }   /* 40% 相对面板，随面板每帧重算 */
+```
+
+`40%` 的参照物是面板高度，而面板正在动画。预览**没有自己的过渡**，所以每一帧都直接取
+「当前面板高度 × 40%」，结果是第一帧就吃掉大部分空间、然后慢慢爬：
+
+```
+面板: 557 → 578 → 619 → 658 → 684 → 701 → 711 → 717 → 720
+预览:  55 → 224 → 241 → 256 → 267 → 273 → 278 → 280 → 281
+              ↑ 第一帧就跳到终值的 80%
+```
+
+看起来就是「预览框先猛地弹开，面板才慢慢追上」。
+
+### 修复要点
+
+- 预览也由 JS 定像素高度（`previewHeight`），上限同样是面板的 40%，**和面板用同一条过渡曲线**。
+- 两者在**同一个离屏克隆**上一次量出（`measurePanel`）。克隆必须先解除自身的 pin：
+  `height:auto`、`max-height:none`、`flex:0 0 auto`，否则量到的是「面板现在的高度」而不是内容需要的高度。
+- 测量**绝不能碰真实面板**：清空高度再写回会因「值未变」而取消过渡（实测于 Chrome 151）。
+- 过渡放慢并统一：`190ms cubic-bezier(.4,0,.2,1)`（原 140ms `ease`），`prefers-reduced-motion` 下两者都关闭。
+
+### 教训
+
+> **一个尺寸是另一个尺寸的百分比时，两者不可能自然同步**——参照物在动画中，百分比每帧都在变。
+> 想让两个盒子一起伸缩，就给它们同一个像素来源、同一条时间曲线。
+> 另外：`height:auto` 在两个 auto 之间不插值，`interpolate-size` 只在「一端是长度」时有用；
+> 而**同一次任务里清空再写回同一属性会让浏览器取消过渡**。
+
+### 测试怎么锁
+
+- `panelHeight` / `previewHeight`：纯函数规则（封顶、份额、关闭时回 `auto`）。
+- 解析真实 CSS 断言：面板与预览的 `transition` 时机**完全一致**，预览仍有 40% 兜底。
+- 源码守卫：测量必须走 `measurePanel`、必须解除预览的 pin、**不许** `panel.style.height = ''`。
+- 反向验证：把预览退回「无过渡 + `flex:0 1 auto`」，对应测试必须失败。
+
 ---
 
 ## R10 — `Ctrl+R` 完全没反应：一次字典注册把整个插件掀翻了
@@ -401,12 +455,13 @@ function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
 | `CSS` | R8：面板 / 列表 / 行 / 预览的布局约束（解析 CSS 后求解，不依赖浏览器） |
 | `apply`（直接调用） | R10：重复注册 locale 字典时插件仍然挂载，`Ctrl+R` 的浮层照常注册 |
 | `LocaleStub`（测试内） | R11：`subscribe` 依赖 `this`，裸传会让浮层渲染即崩 |
+| `measurePanel`（源码守卫） | R9：测量在离屏克隆上做，且先解除预览的 pin |
 | 全部 slot 组件（R12） | 各挂载面真实渲染一次：工厂函数漏传的自由变量（如 `bind`）会在这里炸出来 |
 
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 48 个测试（宿主 13 + 客户端 35）
+npm test          # 50 个测试（宿主 13 + 客户端 37）
 npm run check     # node --check
 ```
 

@@ -30,6 +30,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The reply preview did not glide with the panel, and the glide was too
+  quick.** Swapping replies with `↑` / `↓` snapped the panel to a new height;
+  once it glided, the preview inside it still jumped: its `max-height: 40%` was
+  re-resolved against the animating panel on every frame, so the box took most
+  of its new size on the first frame and then crawled (measured 55 → 224 → …
+  → 281 while the panel had only reached 578). Both boxes are pinned as pixel
+  heights measured together on one off-screen clone and glide on the same
+  190ms `cubic-bezier(.4, 0, .2, 1)` curve, frame for frame.
 - **The plugin's Settings page rendered blank.** `createSettingsPage` builds
   `PromptPeekSettings`, which translates through the `bind` captured in
   `apply`; a refactor moved `bind` behind that factory without adding it to the
