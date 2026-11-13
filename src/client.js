@@ -824,24 +824,16 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * What the answer is showing. `open` is what the key toggled and outlives
-     * a selection with no reply; `shown` is "an answer is on screen now": the
-     * answer is turned on, previews are enabled in Settings, there is a prompt
-     * to answer, and that prompt has a reply. One rule for the panel, the text
-     * that fills it, and the Space key.
+     * Whether the answer area is on screen: Space turned it on, previews are
+     * enabled in Settings, and there is a prompt to answer. The reply's own
+     * text is looked up afterwards; it decides what the area says (the reply,
+     * or that none was found), never whether Space opens it.
      *
-     * @param {{ open: boolean, enabled: boolean, matches: number, text: string | null }} state
-     * @returns {{ open: boolean, shown: boolean, canOpen: boolean }} `canOpen` is
-     *   whether a reply is waiting to be opened: what Space may turn on.
+     * @param {{ open: boolean, enabled: boolean, matches: number }} state
+     * @returns { boolean }
      */
-    function previewBits({ open, enabled, matches, text }) {
-      const ready = enabled && matches > 0;
-      const answerable = typeof text === 'string' && text !== '';
-      return {
-        open,
-        shown: open && ready && answerable,
-        canOpen: ready && answerable,
-      };
+    function answerShown({ open, enabled, matches }) {
+      return open && enabled && matches > 0;
     }
 
     /** First match highlighted inside a collapsed preview. */
@@ -1593,7 +1585,7 @@ window.__ModuleLoader__.load({
         glideStep,
         panelHeight,
         listCap,
-        previewBits,
+        answerShown,
         readReply,
         CSS,
       }),
@@ -1969,14 +1961,15 @@ window.__ModuleLoader__.load({
             const focus = anchor < 0 ? null : { offset: Math.max(0, anchor - shown.start) };
             return renderMarkdown(shown.text, { labels: codeLabels, focus });
           }, [previewText, codeLabels, previewAnchor]);
-          const preview = previewBits({
+          // The old rule, unchanged in behaviour: the area is on from Space,
+          // allowed by Settings and with a prompt selected. The reply's text
+          // only decides what the area says.
+          const previewShown = answerShown({
             open: previewOpen,
             enabled: allowPreview,
             matches: matches.length,
-            text: previewText,
           });
-          const previewShown = preview.shown;
-          const previewVisible = preview.shown;
+          const previewVisible = previewShown;
           // The open panel is a share of the window, so a resize has to re-pin it.
           React.useEffect(() => {
             const onResize = () => setWindowTick((tick) => tick + 1);
@@ -2447,15 +2440,7 @@ window.__ModuleLoader__.load({
               if (matchesRef.current.length === 0) return;
               event.preventDefault();
               event.stopPropagation();
-              // Closes whatever is on screen (an empty answer included); opens
-              // only when a reply is waiting under the selection.
-              const next = previewBits({
-                open: previewOpen,
-                enabled: allowPreview,
-                matches: matchesRef.current.length,
-                text: previewText,
-              });
-              setPreviewOpen((open) => (open ? !preview.shown : next.canOpen));
+              setPreviewOpen((open) => !open);
               return;
             }
             if (pageDirection(key) !== 0) {
