@@ -28,16 +28,40 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- **With the reply open the panel is a fixed 70% of the window, and the answer
+  takes the space the prompt list gives up.** The search panel used to grow by
+  whatever a long reply needed, capped at `min(80vh, 720px)`; the question list
+  inside it kept all the rows it had (up to the ten it can show), so a reply had
+  to be paged through a strip, one third of the panel. Now:
+  - **the question list shows ten rows with the answer hidden and five with it
+    open** (a taller history scrolls inside either), handed to the list in the
+    same render that decides the answer, so leaving the answer restores ten rows
+    at once;
+  - **the panel is `70vh` (clamped to 360–1200px) while the answer is open**, and
+    still sized to its content (capped at `min(80vh, 720px)`) while it is not;
+  - **the answer fills everything the question list leaves**: on a 900px-tall
+    window it shows about 22 lines where it used to show 10.
+- **The panel's three regions are laid out by flex, not by arithmetic.** The
+  prompt list, the answer and the key-hint row shared one column without any
+  rule about which one takes the leftover height; the answer's height was
+  computed in JavaScript, so any measure it missed (the hint row, the block
+  gaps, a border) pushed the hint row into the middle of the panel and left a
+  blank strip under the answer. The list and the hint row are now fixed blocks
+  and the answer is the body region's only flexible one, so the browser gives
+  it exactly what is left and the hint row stays on the panel's bottom edge.
+  The answer's JavaScript height (`previewHeight`), its state and its ref are
+  gone.
+
 ### Fixed
 
 - **The reply preview did not glide with the panel, and the glide was too
-  quick.** Swapping replies with `↑` / `↓` snapped the panel to a new height;
-  once it glided, the preview inside it still jumped: its `max-height: 40%` was
-  re-resolved against the animating panel on every frame, so the box took most
-  of its new size on the first frame and then crawled (measured 55 → 224 → …
-  → 281 while the panel had only reached 578). Both boxes are pinned as pixel
-  heights measured together on one off-screen clone and glide on the same
-  190ms `cubic-bezier(.4, 0, .2, 1)` curve, frame for frame.
+  quick.** Swapping replies with `↑` / `↓` snapped the panel to a new height
+  (measured 55 → 224 → … → 281 while the panel had only reached 578). The panel
+  is pinned as a pixel height measured on one off-screen clone and glides on a
+  190ms `cubic-bezier(.4, 0, .2, 1)` curve; `prefers-reduced-motion` turns the
+  glide off.
 - **The plugin's Settings page rendered blank.** `createSettingsPage` builds
   `PromptPeekSettings`, which translates through the `bind` captured in
   `apply`; a refactor moved `bind` behind that factory without adding it to the
@@ -68,8 +92,9 @@ All notable changes to this project are documented here. The format follows
   few invisible pixels — worst after `PgDn` paged a long answer. The list now
   keeps three whole rows (`min-height`), rows can no longer be squashed
   (`flex:none`, a 30px box that also holds CJK glyphs taller than the 20px line),
-  the preview's ceiling is `40%` of the panel so both always fit, and the panel
-  cap grew to `min(80vh,720px)` for long replies.
+  and the panel cap grew to `min(80vh,720px)` for long replies. (The share of
+  the panel the preview got then was replaced in Unreleased by the list's
+  ten/five-row ceiling and the answer's flexible region.)
 - **`Ctrl+R` and `↑` only saw the page the Host had buffered.** A session opens
   on one page of messages, and older turns are loaded only when the transcript
   asks for them, so a long thread showed three or four prompts no matter what

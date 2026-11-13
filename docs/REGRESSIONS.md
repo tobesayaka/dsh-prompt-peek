@@ -14,8 +14,9 @@
 | R6 | `↑` 在输入框有草稿时不翻历史；`↑` / `↓` 到头即停，退出翻看时草稿被丢掉 | 0.1.0 | 0.4.0 | `↑ and ↓ wrap around the walk, and ↓ past the newest entry returns to the draft` |
 | R7 | 回答翻到顶 / 到底后继续按 `PgDn` / `PgUp` 会串到下一条提问 | 0.1.0 | 0.4.0 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
 | R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 未发布 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
-| R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见 | 0.1.0 | 未发布 | `an open reply preview never squeezes the prompt list to nothing (R8)` |
-| R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 未发布 | `the panel glides between replies as a pixel height (R9)`、`the reply preview glides with the panel instead of jumping ahead (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
+| R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见；预览时提问区仍占 10 行，头重脚轻 | 0.1.0 | 未发布 | `the prompt list shows ten rows resting and five with the answer open (R8)` |
+| R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 未发布 | `the panel glides between replies as a pixel height (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
+| R13 | 回答区的高度靠 JS 算、和提问区、快捷键指引挤在同一列里：预览时快捷键指引被推到面板中间、回答被挤小，改数字永远无效 | 0.4.0 | 未发布 | `the answer region takes what the list and the hint row leave (R8/R9)`、`the hint row sits outside the body region, after the answer` |
 | R10 | `Ctrl+R` 完全没有反应（插件整体没挂载）：重复注册同一份 locale 字典时 `apply` 抛错 | 未发布 | 未发布 | `a duplicate locale registration never takes the composer overlay down (R10)` |
 | R11 | 输入框浮层渲染即崩：`Cannot read properties of undefined (reading 'listeners')`，`Ctrl+R` 看起来仍然没反应 | 未发布 | 未发布 | `the locale subscription survives being called without a receiver (R11)` |
 | R12 | 设置里 prompt-peek 页面空白：`ReferenceError: bind is not defined` | 未发布 | 未发布 | `every mounted surface renders without a ReferenceError (R12)` |
@@ -199,7 +200,8 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ### 修复要点
 
-- 列表给下限：`min-height:calc(3 * 30px + 2px)`（三整行，含两处 1px 的 `gap`）。
+- 列表给下限：`min-height:calc(3 * 30px + 2px)`（三整行，含两处 1px 的 `gap`）
+  ——之后这条下限让位给 R13 的按状态上限（非预览 10 行、预览 5 行，`listCap()`）。
 - 行不被压缩：`flex:none` + 固定 `height:30px`。固定内容高度是必须的——行高 20px 的行框装不下
   中文无衬线字体的 ascender + descender，原来正是靠列表无限压缩顺手把这点溢出裁掉；
   行不再压缩后，多出来的字形会越过本行边界，必须由 30px 的行框自己接住。
@@ -214,10 +216,10 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ### 测试怎么锁
 
-`test/client.test.mjs` 里新增 `#R8` 一条：从 `internals.CSS` 解析出四个选择器，用一个小型
-「column flex 求解器」按面板上限（`min(80vh,720px)` 取 720px）算一遍，断言列表 ≥ 三行、
-预览不超过自己的上限、整列不溢出面板。内部属性（`flex`、`min-height`、`max-height`）被改动时，
-这条测试会直接说出是哪一个不满足。该测试的 `CSS` 导出已在 `internals`，供 `test/` 读取。
+`test/client.test.mjs` 的 `#R8` 条：`listCap(false) = 10 行`、`listCap(true) = 5 行` 是组件规则，
+样式表里的行高（30px）、间距（1px）、内边距（1px）必须和这条规则算出同一个上限；行本身仍
+`flex:none`、不被压缩。最初的「column flex 求解器」版本随 R13 的结构拆分一起退场
+（预览高度不再由 JS 算，没有可求解的百分比上限）。
 
 
 
@@ -253,11 +255,12 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ### 修复要点
 
-- 预览也由 JS 定像素高度（`previewHeight`），上限同样是面板的 40%，**和面板用同一条过渡曲线**。
-- 两者在**同一个离屏克隆**上一次量出（`measurePanel`）。克隆必须先解除自身的 pin：
-  `height:auto`、`max-height:none`、`flex:0 0 auto`，否则量到的是「面板现在的高度」而不是内容需要的高度。
-- 测量**绝不能碰真实面板**：清空高度再写回会因「值未变」而取消过渡（实测于 Chrome 151）。
-- 过渡放慢并统一：`190ms cubic-bezier(.4,0,.2,1)`（原 140ms `ease`），`prefers-reduced-motion` 下两者都关闭。
+- 面板由 JS 定像素高度并过渡：`190ms cubic-bezier(.4,0,.2,1)`（原 140ms `ease`），
+  `prefers-reduced-motion` 下关闭。
+- 测量在**离屏克隆**上做（`measurePanel`）：克隆 `height:auto`，并把回答框从克隆里摘掉，
+  量到的才是“关掉回答时面板要多高”。测量**绝不能碰真实面板**：清空高度再写回会因「值未变」而取消过渡（实测于 Chrome 151）。
+- 预览曾经也由 JS 定像素高度（`previewHeight`，面板的 40%）。**这条已撤销**：见 R13，
+  回答改成弹性子项后浏览器自己分配高度，`previewHeight` 与它的 ref/state 都已删除。
 
 ### 教训
 
@@ -268,10 +271,62 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ### 测试怎么锁
 
-- `panelHeight` / `previewHeight`：纯函数规则（封顶、份额、关闭时回 `auto`）。
-- 解析真实 CSS 断言：面板与预览的 `transition` 时机**完全一致**，预览仍有 40% 兜底。
-- 源码守卫：测量必须走 `measurePanel`、必须解除预览的 pin、**不许** `panel.style.height = ''`。
-- 反向验证：把预览退回「无过渡 + `flex:0 1 auto`」，对应测试必须失败。
+- `panelHeight`：纯函数规则（非预览封顶 `min(80vh,720px)`、预览 70vh 并夹在 360–1200px、关闭时回 `auto`）。
+- 源码守卫：测量必须走 `measurePanel`、必须把回答框摘出克隆、**不许** `panel.style.height = ''`。
+- 回答区自身的伸缩规则归 R13 的测试（不再有 `previewHeight`）。
+
+---
+
+## R13 — 三个区域挤在一列里，回答区和快捷键指引互相推挤
+
+### 现象
+
+按空格预览后，面板底部的快捷键指引会往上跑到回答区上方，回答区下面留出一截空白；
+反复调“回答高度 = 面板 − 列表 − …”的数字，界面上**毫无变化**。
+期间还出现过预览区只剩一行、退出预览后提问区仍停在 5 行等连带问题。
+
+### 根因
+
+提问列表、回答、快捷键指引三者是同一个纵向 flex 列里的兄弟，但**没有分工**：
+
+```css
+.dsh-pp-list    { flex:1 1 auto; min-height:0 }   /* 吃满剩余空间 */
+.dsh-pp-preview { flex:none; height:<JS 算出的像素> } /* 固定，且高度靠 JS 猜 */
+.dsh-pp-hint    { /* 普通块，谁也没说它占不占剩余空间 */ }
+```
+
+回答的高度是 JS 用“面板高 − 列表 − 间距 − padding…”**估**出来的；只要估漏一项
+（提示行、行间距、边框、列表内边距），浏览器就会按自己的 flex 规则重新分配，
+把提示行推上去、在底部留白。**数字永远追不上布局**，改多少次都无效。
+
+### 修复要点
+
+拆成三个明确分工的块，并用一层 body 区域承担“剩余高度”：
+
+```
+.dsh-pp-panel
+├─ .dsh-pp-head / .dsh-pp-search
+├─ .dsh-pp-body            flex:1 1 auto; min-height:0
+│  ├─ .dsh-pp-list          flex:0 0 auto + max-height（listCap：非预览 10 行 / 预览 5 行）
+│  └─ .dsh-pp-preview       flex:1 1 auto（唯一的弹性块，吃掉 body 剩余）
+└─ .dsh-pp-hint            flex:0 0 auto + margin-top:auto（永远贴底）
+```
+
+- 回答区**不再写内联 height**，`previewHeight()`、`previewHeightPx` 状态与 ref 全部删除。
+- 预览深度加面板高度规则：预览时面板 = `70vh`（夹在 360–1200px），非预览仍按内容封顶。
+
+### 教训
+
+> **能用布局表达的，就不要用 JS 算**。父 flex 里只要还有“会抢剩余空间”的兄弟，
+> JS 写进去的 `height` 就只是一个愿望，浏览器按自己的规则分配后才算数。
+> 排查这类问题的第一步应是**打印 DOM 结构与计算后的高度**，而不是改公式。
+
+### 测试怎么锁
+
+- `the answer region takes what the list and the hint row leave (R8/R9)`：body 为弹性，
+  提问区 `flex:0 0`，回答区是唯一 `flex:1 1` 且**没有** `height` / `max-height`，提示行 `flex:0 0` + `margin-top:auto`。
+- `the hint row sits outside the body region, after the answer`：源码守卫，提示行必须是 body 之后的兄弟节点。
+- `the prompt list shows ten rows resting and five with the answer open (R8)`：`listCap` 与样式表行高一致。
 
 ---
 
@@ -452,16 +507,18 @@ function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
 | `browseStep` | 翻看状态的草稿存取：每一条退出路径都写回原草稿 |
 | `filterHistory` | 搜索过滤：默认只搜提问；开关打开后也搜回答，且只有回答命中才标 `answerHit` |
 | `ownsComposerKey` | `Ctrl+R` / `Cmd+R` 的归属判定（纯函数；组件另有一条源码守卫，确保先检查焦点） |
-| `CSS` | R8：面板 / 列表 / 行 / 预览的布局约束（解析 CSS 后求解，不依赖浏览器） |
+| `listCap` | R8 / R13：提问区上限（非预览 10 行、预览 5 行），与样式表行高一致 |
+| `CSS` | R8 / R13：面板 / body / 列表 / 回答 / 提示行的 flex 分工（解析 CSS 断言） |
 | `apply`（直接调用） | R10：重复注册 locale 字典时插件仍然挂载，`Ctrl+R` 的浮层照常注册 |
 | `LocaleStub`（测试内） | R11：`subscribe` 依赖 `this`，裸传会让浮层渲染即崩 |
-| `measurePanel`（源码守卫） | R9：测量在离屏克隆上做，且先解除预览的 pin |
+| `measurePanel`（源码守卫） | R9：测量在离屏克隆上做，且把回答框摘出克隆 |
+| `panelHeight` | R9：非预览按内容封顶 `min(80vh,720px)`；预览固定 70vh（夹 360–1200px） |
 | 全部 slot 组件（R12） | 各挂载面真实渲染一次：工厂函数漏传的自由变量（如 `bind`）会在这里炸出来 |
 
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 50 个测试（宿主 13 + 客户端 37）
+npm test          # 45 个测试（客户端 32 + 宿主 13）
 npm run check     # node --check
 ```
 

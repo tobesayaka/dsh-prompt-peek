@@ -49,8 +49,26 @@ window.__ModuleLoader__.load({
     const PANEL_MAX = 720;
     /** `80vh`, the other half of the panel's cap, as a share. */
     const PANEL_MAX_VIEWPORT = 0.8;
-    /** The share of the panel the reply preview may take, matching `.dsh-pp-preview`. */
-    const PANEL_PREVIEW_SHARE = 0.4;
+    /**
+     * With the answer open the panel is the same share of the window every
+     * time (70vh, clamped into the range a bare window can still be read in),
+     * so the question area is a fixed five rows and the answer never moves the
+     * panel around. With the answer hidden it is sized to its content instead.
+     */
+    const PANEL_OPEN_SHARE = 0.7;
+    const PANEL_OPEN_MIN = 360;
+    const PANEL_OPEN_MAX = 1200;
+    /** Rows of prompts the list shows at most; the rest scroll. */
+    const LIST_ROWS_RESTING = 10;
+    const LIST_ROWS_PREVIEW = 5;
+    /** `.dsh-pp-row`'s height and the list's gap, i.e. the pitch of one prompt row. */
+    const LIST_ROW_PITCH = 31;
+    /** `.dsh-pp-list`'s padding, 1px above and 1px below its rows. */
+    const LIST_PADDING = 2;
+    /** The list's ceiling: ten rows with the answer hidden, five with it open. */
+    function listCap(previewVisible) {
+      return (previewVisible ? LIST_ROWS_PREVIEW : LIST_ROWS_RESTING) * LIST_ROW_PITCH + LIST_PADDING;
+    }
     const EMPTY = [];
     /**
      * DSH's locale service owns the language choice: the user picks it once in
@@ -258,7 +276,8 @@ window.__ModuleLoader__.load({
 .dsh-pp-query{box-sizing:border-box;width:100%;height:34px;padding:0 10px 0 30px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;outline:none}
 .dsh-pp-query::placeholder{color:var(--dsw-alias-label-secondary)}
 .dsh-pp-query:focus{border-color:var(--dsw-alias-brand-primary)}
-.dsh-pp-list{position:relative;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;min-height:calc(3 * 30px + 2px);overflow-y:auto;overscroll-behavior:contain;padding:1px 0}
+.dsh-pp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:7px}
+.dsh-pp-list{position:relative;flex:0 0 auto;display:flex;flex-direction:column;gap:1px;min-height:0;max-height:314px;overflow-y:auto;overscroll-behavior:contain;padding:1px 0}
 .dsh-pp-row{flex:none;display:block;box-sizing:border-box;width:100%;height:30px;text-align:left;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;padding:5px 9px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .dsh-pp-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-pp-row[data-active="true"]{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,var(--dsw-alias-bg-layer-2))}
@@ -266,15 +285,15 @@ window.__ModuleLoader__.load({
 .dsh-pp-row__hit{margin-left:8px;padding:0 6px;border-radius:5px;font-size:11px;line-height:18px;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}
 .dsh-pp-mark{background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .dsh-pp-empty{padding:12px 8px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-pp-preview{flex:none;min-height:0;max-height:40%;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:contain;margin-top:1px;padding:0 0 2px;transition:height 190ms cubic-bezier(.4,0,.2,1)}
+.dsh-pp-preview{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:contain;margin-top:1px;padding:0 0 2px}
 .dsh-pp-preview__title{flex:none;display:flex;align-items:center;gap:6px;box-sizing:border-box;width:calc(100% + 20px);margin:0 0 0 -10px;padding:6px 10px;border-bottom:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;letter-spacing:.02em}
 .dsh-pp-preview__title::before{content:"";width:5px;height:5px;border-radius:999px;background:var(--dsw-alias-brand-primary);opacity:.8}
 .dsh-pp-preview__body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:6px 4px 0 2px;font-size:12px;line-height:18px}
 .dsh-pp-preview__empty{flex:0 0 auto;overflow:hidden;padding:6px 4px 0 2px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
-.dsh-pp-hint{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 2px 0;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
+.dsh-pp-hint{flex:0 0 auto;margin-top:auto;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 2px 0;border-top:0.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
 .dsh-pp-hint__group{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
 .dsh-pp-hint__where{margin-left:auto;white-space:nowrap;border:0;padding:0;margin-top:0;margin-bottom:0;margin-right:0;background:none;color:var(--dsw-alias-brand-primary);font:inherit;font-size:11px;line-height:16px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-@media (prefers-reduced-motion:reduce){.dsh-pp-panel,.dsh-pp-preview{transition:none}}
+@media (prefers-reduced-motion:reduce){.dsh-pp-panel{transition:none}}
 .dsh-pp-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10px;line-height:1;font-family:inherit}
 .dsh-pp-md{font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary)}
 .dsh-pp-md__p{margin:0 0 6px;white-space:pre-wrap;word-break:break-word}
@@ -573,19 +592,19 @@ window.__ModuleLoader__.load({
      * one off-screen clone laid out at `height:auto`.
      *
      * Both boxes are pinned to pixel heights while open, and a clone copies
-     * inline styles: the preview's pin and its `max-height` ceiling must come
-     * off the clone or it would report the height the panel already has instead
-     * of the height its content needs (checked in Chrome 151). Measuring on the
-     * clone also keeps the real panel from being resized, which cancels its own
-     * transition.
+     * inline styles, and the answer is the body region's flexible block, so the
+     * answer box is taken off the clone: the height wanted is the one the panel
+     * takes with the question list and the hint row alone (checked in Chrome
+     * 151). Measuring on the clone also keeps the real panel from being
+     * resized, which cancels its own transition.
      *
      * @param {HTMLElement} panel
-     * @returns {{ panel: number, preview: number }} heights in pixels, 0 when unmeasurable
+     * @returns {{ panel: number }} heights in pixels, 0 when unmeasurable
      */
     function measurePanel(panel) {
-      if (panel === null || panel === undefined || typeof panel.cloneNode !== 'function') return { panel: 0, preview: 0 };
+      if (panel === null || panel === undefined || typeof panel.cloneNode !== 'function') return { panel: 0 };
       const width = panel.getBoundingClientRect().width;
-      if (!(width > 0)) return { panel: 0, preview: 0 };
+      if (!(width > 0)) return { panel: 0 };
       const clone = panel.cloneNode(true);
       clone.removeAttribute('id');
       clone.style.position = 'absolute';
@@ -595,17 +614,11 @@ window.__ModuleLoader__.load({
       clone.style.height = 'auto';
       clone.style.transition = 'none';
       const preview = clone.querySelector('.dsh-pp-preview');
-      if (preview !== null) {
-        preview.style.height = 'auto';
-        preview.style.maxHeight = 'none';
-        preview.style.flex = '0 0 auto';
-        preview.style.transition = 'none';
-      }
+      if (preview !== null) preview.remove();
       (panel.parentNode === null ? document.body : panel.parentNode).appendChild(clone);
       const panelHeightPx = Math.ceil(clone.getBoundingClientRect().height);
-      const previewHeightPx = preview === null ? 0 : Math.ceil(preview.getBoundingClientRect().height);
       clone.remove();
-      return { panel: panelHeightPx, preview: previewHeightPx };
+      return { panel: panelHeightPx };
     }
 
     /**
@@ -619,33 +632,26 @@ window.__ModuleLoader__.load({
      * the panel's `transition: height` does glide. The stylesheet keeps the
      * same ceiling, applied here because a number would otherwise ignore it.
      *
-     * @param {{ open: boolean, content: number, viewport: number, reduced: boolean }} state
+     * With the answer open the panel takes `PANEL_OPEN_SHARE` of the window
+     * whatever the reply is long, so the question area and the answer split one
+     * steady height; with it hidden the panel is the measured content, capped
+     * at `min(80vh, 720px)` as before.
+     *
+     * @param {{ open: boolean, preview: boolean, content: number, viewport: number, reduced: boolean }} state
      * @returns {{ height: number | null, animate: boolean }}
      */
-    function panelHeight({ open, content, viewport, reduced }) {
+    function panelHeight({ open, preview = false, content, viewport, reduced }) {
       if (!open || !(content > 0)) return { height: null, animate: false };
+      if (preview) {
+        const shared = viewport > 0
+          ? Math.round(viewport * PANEL_OPEN_SHARE)
+          : PANEL_OPEN_MAX;
+        const height = Math.max(PANEL_OPEN_MIN, Math.min(PANEL_OPEN_MAX, shared));
+        return { height, animate: reduced !== true };
+      }
       const byViewport = viewport > 0 ? PANEL_MAX_VIEWPORT * viewport : PANEL_MAX;
       const ceiling = Math.min(byViewport, PANEL_MAX);
       return { height: Math.min(Math.ceil(content), ceiling), animate: reduced !== true };
-    }
-
-    /**
-     * The reply preview's height as a pixel value, or `null` when it is closed.
-     *
-     * The preview is pinned too, instead of relying on `max-height: 40%`: a
-     * percentage is re-resolved against the panel on every frame of the panel's
-     * own glide, so the box would take most of the space on the first frame and
-     * then crawl — it moved, but not with the panel. A number capped by the same
-     * share glides on the same `transition` and stays in step with the panel.
-     *
-     * @param {{ open: boolean, content: number, panel: number }} state
-     * @returns {number | null}
-     */
-    function previewHeight({ open, content, panel }) {
-      if (!open || !(panel > 0)) return null;
-      const share = PANEL_PREVIEW_SHARE * panel;
-      const wanted = content > 0 ? content : 0;
-      return Math.max(0, Math.min(Math.ceil(wanted), Math.floor(share)));
     }
 
     /**
@@ -1565,7 +1571,7 @@ window.__ModuleLoader__.load({
         glideFrame,
         glideStep,
         panelHeight,
-        previewHeight,
+        listCap,
         CSS,
       }),
       inject: ['slots', 'locale'],
@@ -1756,7 +1762,6 @@ window.__ModuleLoader__.load({
           const pointerRef = React.useRef(null);
           const matchesRef = React.useRef(EMPTY);
           const panelHeightPxRef = React.useRef(null);
-          const previewHeightPxRef = React.useRef(null);
 
           sessionRef.current = props.sessionId;
           draftRef.current = typeof draft === 'string' ? draft : '';
@@ -1773,8 +1778,8 @@ window.__ModuleLoader__.load({
           const [loadingOlder, setLoadingOlder] = React.useState(false);
           /** The panel's own height as a number, so a reply swap can glide; null is `auto`. */
           const [panelHeightPx, setPanelHeightPx] = React.useState(null);
-          /** The reply preview's own pixel height, so it glides with the panel. */
-          const [previewHeightPx, setPreviewHeightPx] = React.useState(null);
+          /** Bumped on resize so the pinned heights follow a window that moved. */
+          const [windowTick, setWindowTick] = React.useState(0);
           const panelOpen = panel !== null;
           // The overlay may mount before the Host and settings have answered.
           // Until both have, it renders an empty, inactive tree without
@@ -1943,6 +1948,16 @@ window.__ModuleLoader__.load({
           }, [previewText, codeLabels, previewAnchor]);
           const previewShown = previewOpen && matches.length > 0;
           const previewVisible = previewShown && allowPreview;
+          // The open panel is a share of the window, so a resize has to re-pin it.
+          React.useEffect(() => {
+            const onResize = () => setWindowTick((tick) => tick + 1);
+            window.addEventListener('resize', onResize);
+            return () => window.removeEventListener('resize', onResize);
+          }, []);
+          // Ten rows resting, five while the answer is open: derived in the same
+          // render that decides the panel, so leaving the answer never leaves
+          // the question area at five rows until the next key press.
+          const listCapPx = listCap(previewVisible);
           const pager = pagePager({
             previewPageSize: readNow('previewPageSize'),
             smoothScroll: readNow('smoothScroll'),
@@ -2108,21 +2123,17 @@ window.__ModuleLoader__.load({
           }, [selected, panelOpen, previewVisible]);
 
           /**
-           * Drive the panel **and** the reply preview as pixel heights so a
-           * reply swap glides instead of snapping (see {@link panelHeight} and
-           * {@link previewHeight}). Measuring both on one clone keeps them on
-           * the same clock: the preview's own percentage ceiling would otherwise
-           * be re-resolved against the panel on every frame of the glide, so it
-           * would jump most of the way on the first frame and then crawl. `auto`
-           * is handed back when the panel closes.
+           * Pin the panel's height as a number so its change glides instead of
+           * snapping (see {@link panelHeight}). The three regions inside it —
+           * the prompt list, the answer and the hint row — are laid out by flex
+           * alone: the first and last are fixed, the answer takes the rest.
+           * `auto` is handed back when the panel closes.
            */
           React.useLayoutEffect(() => {
             const panel = panelRef.current;
             if (panel === null || panel === undefined || !panelOpen) {
               panelHeightPxRef.current = null;
-              previewHeightPxRef.current = null;
               setPanelHeightPx(null);
-              setPreviewHeightPx(null);
               return;
             }
             const reduced = typeof window.matchMedia === 'function'
@@ -2130,24 +2141,20 @@ window.__ModuleLoader__.load({
             const measured = measurePanel(panel);
             const next = panelHeight({
               open: true,
+              preview: previewVisible,
               content: measured.panel,
               viewport: window.innerHeight,
               reduced,
             }).height;
-            const nextPreview = previewHeight({
-              open: previewVisible,
-              content: measured.preview,
-              panel: next === null ? 0 : next,
-            });
+            // The answer's height is the browser's job now: the list and the
+            // hint row are fixed blocks and the answer is the only flexible
+            // one, so it takes exactly what they leave, one frame after the
+            // panel's own height settles. This effect only pins that height.
             if (next !== panelHeightPxRef.current) {
               panelHeightPxRef.current = next;
               setPanelHeightPx(next);
             }
-            if (nextPreview !== previewHeightPxRef.current) {
-              previewHeightPxRef.current = nextPreview;
-              setPreviewHeightPx(nextPreview);
-            }
-          }, [panelOpen, matches, previewNodes, previewVisible, queryText, bind]);
+          }, [panelOpen, matches, previewNodes, previewVisible, queryText, bind, windowTick]);
 
           /** Scroll the row that carries a long prompt's first match into view of the preview. */
           React.useEffect(() => {
@@ -2523,10 +2530,14 @@ window.__ModuleLoader__.load({
                   onWheel: onQueryWheel,
                 }),
               ),
+              h('div', { className: 'dsh-pp-body' },
               h('div', {
                 ref: listRef,
                 id: 'dsh-pp-listbox',
                 className: 'dsh-pp-list',
+                // A ceiling, never a height: a shorter history keeps its own
+                // rows, and a longer one scrolls inside ten (or five) rows.
+                style: listCapPx === null ? undefined : { maxHeight: listCapPx + 'px' },
                 role: 'listbox',
                 tabIndex: -1,
                 onWheel: onQueryWheel,
@@ -2535,10 +2546,12 @@ window.__ModuleLoader__.load({
                   ? h('div', { className: 'dsh-pp-empty' }, translate('empty'))
                   : matches.map(row),
               ),
+              // No pinned height: in the body region the answer is the only
+              // box that grows, so the browser gives it everything the list and
+              // the hint row leave. The question area keeps its five rows above.
               previewVisible ? h('div', {
                 key: 'preview',
                 className: 'dsh-pp-preview',
-                style: previewHeightPx === null ? undefined : { height: previewHeightPx + 'px' },
               },
                 h('div', { className: 'dsh-pp-preview__title' }, translate('previewTitle')),
                 // The scroller is this body, not the box around it: the title
@@ -2546,6 +2559,9 @@ window.__ModuleLoader__.load({
                 h('div', { ref: previewRef, className: previewNodes === null ? 'dsh-pp-preview__empty' : 'dsh-pp-preview__body' },
                   previewNodes === null ? translate('previewMissing') : previewNodes),
               ) : null,
+              ),
+              // The third block: its own row at the bottom of the panel, outside
+              // the body region, so neither the list nor the answer can push it.
               h('div', { className: 'dsh-pp-hint' },
                 h('span', { className: 'dsh-pp-hint__group' }, keycap('↑'), keycap('↓'), translate('hintSelect')),
                 allowPreview
