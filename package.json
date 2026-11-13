@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-peek",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Shell-style prompt recall with a Markdown answer preview for the DeepSeek Harness web composer.",
   "icon": "./assets/icon.svg",

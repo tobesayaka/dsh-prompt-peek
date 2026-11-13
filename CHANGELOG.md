@@ -26,7 +26,7 @@ All notable changes to this project are documented here. The format follows
   previous or next prompt once the reply reaches its top or bottom, so paging
   one reply never spills into another.
 
-## Unreleased
+## 0.4.1 - 2026-11-13
 
 ### Changed
 
@@ -53,6 +53,14 @@ All notable changes to this project are documented here. The format follows
   it exactly what is left and the hint row stays on the panel's bottom edge.
   The answer's JavaScript height (`previewHeight`), its state and its ref are
   gone.
+- **The interface language is DSH's, not the plugin's.** The panel, the history
+  pill, and the Settings page now read their copy from DSH's locale service
+  (`ctx.locale`), registered as one namespace holding both baseline languages.
+  The plugin's own **Interface language** setting (`Follow the DSH interface` /
+  `中文` / `English`) is gone, along with its `locale` field in
+  `~/.dsh/prompt-peek/settings.json`: an existing `locale` value is ignored and
+  dropped on the next save. A language switch in **Settings → General →
+  Language** now reaches the open panel without a reload.
 
 ### Fixed
 
@@ -101,7 +109,7 @@ All notable changes to this project are documented here. The format follows
   keeps three whole rows (`min-height`), rows can no longer be squashed
   (`flex:none`, a 30px box that also holds CJK glyphs taller than the 20px line),
   and the panel cap grew to `min(80vh,720px)` for long replies. (The share of
-  the panel the preview got then was replaced in Unreleased by the list's
+  the panel the preview got then was replaced later in 0.4.1 by the list's
   ten/five-row ceiling and the answer's flexible region.)
 - **`Ctrl+R` and `↑` only saw the page the Host had buffered.** A session opens
   on one page of messages, and older turns are loaded only when the transcript
@@ -113,17 +121,6 @@ All notable changes to this project are documented here. The format follows
   history. The panel count and the history pill show "Loading earlier
   prompts…" while pages arrive; nothing is written to disk and the session log
   is still never read directly.
-
-### Changed
-
-- **The interface language is DSH's, not the plugin's.** The panel, the history
-  pill, and the Settings page now read their copy from DSH's locale service
-  (`ctx.locale`), registered as one namespace holding both baseline languages.
-  The plugin's own **Interface language** setting (`Follow the DSH interface` /
-  `中文` / `English`) is gone, along with its `locale` field in
-  `~/.dsh/prompt-peek/settings.json`: an existing `locale` value is ignored and
-  dropped on the next save. A language switch in **Settings → General →
-  Language** now reaches the open panel without a reload.
 
 ## 0.3.4 - 2026-11-11
 
@@ -320,17 +317,3 @@ All notable changes to this project are documented here. The format follows
 - Markdown preview of the reply to the selected prompt, toggled with `Ctrl+Space`.
 - Page keys for the reply preview.
 - English and Chinese plugin-list metadata.
-
-### Changed
-
-- **`↑` walks the history like a shell.** It works while the composer holds a
-  draft (the draft is stashed), and both `↑` and `↓` wrap around the history
-  instead of stopping at either end.
-- **Leaving the walk always restores the draft.** `Esc`, a click back into the
-  composer, typing, and `↓` past the newest prompt all put back the text the
-  composer held when the walk began.
-- **`PgUp` / `PgDn` stop at the edge.** They no longer move the selection to the
-  previous or next prompt once the reply reaches its top or bottom, so paging
-  one reply never spills into another.
-
-## Unreleased

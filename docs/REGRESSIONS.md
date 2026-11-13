@@ -13,14 +13,14 @@
 | R3 | 按 `PgUp` 预览缓慢**向下**滚动，且停不下来 | 0.3.3 | 0.3.4 | `an upward glide step is negative, never +1`、`PgUp from a scrolled preview lands on the top, frame by frame`、`PgUp during a PgDn glide turns it around instead of continuing down` |
 | R6 | `↑` 在输入框有草稿时不翻历史；`↑` / `↓` 到头即停，退出翻看时草稿被丢掉 | 0.1.0 | 0.4.0 | `↑ and ↓ wrap around the walk, and ↓ past the newest entry returns to the draft` |
 | R7 | 回答翻到顶 / 到底后继续按 `PgDn` / `PgUp` 会串到下一条提问 | 0.1.0 | 0.4.0 | `PgUp and PgDn page the preview, open it when hidden, and never do nothing` |
-| R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 未发布 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
-| R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见；预览时提问区仍占 10 行，头重脚轻 | 0.1.0 | 未发布 | `the prompt list shows ten rows resting and five with the answer open (R8)` |
-| R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 未发布 | `the panel glides between replies as a pixel height (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
-| R13 | 回答区的高度靠 JS 算、和提问区、快捷键指引挤在同一列里：预览时快捷键指引被推到面板中间、回答被挤小，改数字永远无效 | 0.4.0 | 未发布 | `the answer region takes what the list and the hint row leave (R8/R9)`、`the hint row sits outside the body region, after the answer` |
-| R14 | 空格键、回答区、回复正文三条路径各自判断“要不要显示回答”：选中一条还没回答的提问也能打开空回答；设置里关掉预览后空格仍能打开 | 0.1.0 | 未发布 | `Space opens an answer only when a reply is waiting under the selection`、`the answer area follows the same rule as the key`、`the panel and the Space key both read the one preview rule`、`the answer belongs to the selected prompt, never to its neighbour` |
-| R10 | `Ctrl+R` 完全没有反应（插件整体没挂载）：重复注册同一份 locale 字典时 `apply` 抛错 | 未发布 | 未发布 | `a duplicate locale registration never takes the composer overlay down (R10)` |
-| R11 | 输入框浮层渲染即崩：`Cannot read properties of undefined (reading 'listeners')`，`Ctrl+R` 看起来仍然没反应 | 未发布 | 未发布 | `the locale subscription survives being called without a receiver (R11)` |
-| R12 | 设置里 prompt-peek 页面空白：`ReferenceError: bind is not defined` | 未发布 | 未发布 | `every mounted surface renders without a ReferenceError (R12)` |
+| R5 | `Ctrl+R` / `↑` 只能看到宿主已缓冲的那一页提示词 | 0.1.0 | 0.4.1 | `the panel asks the Host for older pages until it has historyLimit prompts (R5)`、`a session without older history never loops, and a short session stays short (R5)`、`loading counts prompts the same way the list does, and never double-loads (R5)` |
+| R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见；预览时提问区仍占 10 行，头重脚轻 | 0.1.0 | 0.4.1 | `the prompt list shows ten rows resting and five with the answer open (R8)` |
+| R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 0.4.1 | `the panel glides between replies as a pixel height (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
+| R13 | 回答区的高度靠 JS 算、和提问区、快捷键指引挤在同一列里：预览时快捷键指引被推到面板中间、回答被挤小，改数字永远无效 | 0.4.0 | 0.4.1 | `the answer region takes what the list and the hint row leave (R8/R9)`、`the hint row sits outside the body region, after the answer` |
+| R14 | 空格键、回答区、回复正文三条路径各自判断“要不要显示回答”：选中一条还没回答的提问也能打开空回答；设置里关掉预览后空格仍能打开 | 0.1.0 | 0.4.1 | `Space opens an answer only when a reply is waiting under the selection`、`the answer area follows the same rule as the key`、`the panel and the Space key both read the one preview rule`、`the answer belongs to the selected prompt, never to its neighbour` |
+| R10 | `Ctrl+R` 完全没有反应（插件整体没挂载）：重复注册同一份 locale 字典时 `apply` 抛错 | 未发布 | 0.4.1 | `a duplicate locale registration never takes the composer overlay down (R10)` |
+| R11 | 输入框浮层渲染即崩：`Cannot read properties of undefined (reading 'listeners')`，`Ctrl+R` 看起来仍然没反应 | 未发布 | 0.4.1 | `the locale subscription survives being called without a receiver (R11)` |
+| R12 | 设置里 prompt-peek 页面空白：`ReferenceError: bind is not defined` | 未发布 | 0.4.1 | `every mounted surface renders without a ReferenceError (R12)` |
 
 ---
 
