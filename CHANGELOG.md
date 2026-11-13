@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.0 - 2026-11-13
+
+### Changed
+
+- **First stable release, and the end of new features.** Prompt peek is
+  feature-frozen: from here on this plugin gets fixes only.
+
+### Recap
+
+- What 0.x built: arrow-key recall of the prompts sent in the current session,
+  shell-style, with the draft stashed and restored around the walk; `Ctrl+R`
+  reverse search with a floating panel, live filtering, and optional matching
+  against dsh's replies; a Markdown preview of the reply to the selected prompt,
+  rendered with the host's own code block and paged smoothly by `PgUp` / `PgDn`;
+  and a **Settings → Prompt peek** page that saves its policy as one form, with
+  the panel and the page following DSH's interface language rather than a
+  language setting of their own. History comes from the session's own event
+  window, older pages are pulled through `session.loadOlder()`, and nothing is
+  written to disk.
+
 ## 0.4.0 - 2026-11-12
 
 ### Added
