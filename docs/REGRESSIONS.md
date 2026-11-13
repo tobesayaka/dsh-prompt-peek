@@ -17,6 +17,7 @@
 | R8 | 打开回答预览（尤其按 `PgDn` 翻长回答）时，提问列表被挤成一条线，文字看不见；预览时提问区仍占 10 行，头重脚轻 | 0.1.0 | 未发布 | `the prompt list shows ten rows resting and five with the answer open (R8)` |
 | R9 | 用 `↑` / `↓` 切换回答时面板高度瞬间跳变；预览框不跟面板一起伸缩、动画偏快 | 未发布 | 未发布 | `the panel glides between replies as a pixel height (R9)`、`the panel height is measured on a clone, never by resizing the panel (R9)` |
 | R13 | 回答区的高度靠 JS 算、和提问区、快捷键指引挤在同一列里：预览时快捷键指引被推到面板中间、回答被挤小，改数字永远无效 | 0.4.0 | 未发布 | `the answer region takes what the list and the hint row leave (R8/R9)`、`the hint row sits outside the body region, after the answer` |
+| R14 | 空格键、回答区、回复正文三条路径各自判断“要不要显示回答”：选中一条还没回答的提问也能打开空回答；设置里关掉预览后空格仍能打开 | 0.1.0 | 未发布 | `Space opens an answer only when a reply is waiting under the selection`、`the answer area follows the same rule as the key`、`the panel and the Space key both read the one preview rule`、`the answer belongs to the selected prompt, never to its neighbour` |
 | R10 | `Ctrl+R` 完全没有反应（插件整体没挂载）：重复注册同一份 locale 字典时 `apply` 抛错 | 未发布 | 未发布 | `a duplicate locale registration never takes the composer overlay down (R10)` |
 | R11 | 输入框浮层渲染即崩：`Cannot read properties of undefined (reading 'listeners')`，`Ctrl+R` 看起来仍然没反应 | 未发布 | 未发布 | `the locale subscription survives being called without a receiver (R11)` |
 | R12 | 设置里 prompt-peek 页面空白：`ReferenceError: bind is not defined` | 未发布 | 未发布 | `every mounted surface renders without a ReferenceError (R12)` |
@@ -330,6 +331,52 @@ return Math.sign(remaining) * Math.min(travel, Math.ceil(left));
 
 ---
 
+## R14 — 空格、回答区、回复正文各判各的
+
+### 现象
+
+选中一条**还没有回答**的提问（刚发出、dsh 还在思考，或这一轮被中断），按空格会弹出回答区，
+里面写着「没有找到回答」；另外，在设置里关掉「显示回答预览」后，焦点在搜索框上按空格仍可能
+把回答区打开（打开与否取决于三条路径里哪条先判断）。
+
+### 根因
+
+「回答该不该显示」这件事被拆成了三处：
+
+- 空格键：`setPreviewOpen((open) => !open)`，只看“有没有列表项”；
+- 回答区渲染：`previewOpen && matches.length > 0`，**不看设置里的开关**；
+- 回复正文 effect：只按 `previewOpen` 去取回复，取不到就显示“没有回答”。
+
+三处的条件各不相同，于是同一次按键在不同路径上得出不同结论。
+
+### 修复要点
+
+- 一条纯函数 `previewBits({ open, enabled, matches, text })`：`shown` = 打开 && 设置允许 &&
+  有列表项 && 有回复正文；`canOpen` = 设置允许 && 有列表项 && 有回复正文。
+- 回答区、提示行、空格键全部只读这一个结果：空格关闭时关掉屏幕上的一切，打开时只有
+  `canOpen` 才真正打开。
+- `readReply`（“这条提问之后的回答”）导出给测试：已有测试只覆盖了行级文本，没有覆盖
+  “选中的提问本身有没有回答”。
+
+### 教训
+
+> **同一个判断出现两次，就等于会出现两种答案。** 先把“该不该显示”收敛成一个纯函数并给它
+> 列出所有输入（包括设置开关），再让每个界面去读它——这比在每个界面里补一个 `if` 可靠得多。
+> 另外，`npm test` 全绿不代表真实行为正确：之前只有行级文本和布局结构的测试，
+> “空格在无回答的提问上会打开空回答”这类**行为**从没被测过。
+
+### 测试怎么锁
+
+- `Space opens…`：无回复、无列表项、设置关闭三种情况都不得打开。
+- `the answer area follows the same rule as the key`：打开后切换选中到无回复的提问、
+  或设置中途关闭，回答区必须消失而不是留下空框。
+- `the answer belongs to the selected prompt…`：`readReply` 不会把上一条提问的回答借给下一条。
+- 源码守卫：只允许一处 `setPreviewOpen`，且必须调用 `previewBits`；面板里不得再出现
+  `previewOpen && matches.length > 0` 这种旧判断。反向验证：把空格改回“只看列表长度”，
+  或在面板里恢复旧判断，测试必须失败（本次已验过）。
+
+---
+
 ## R10 — `Ctrl+R` 完全没反应：一次字典注册把整个插件掀翻了
 
 ### 现象
@@ -508,6 +555,8 @@ function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
 | `filterHistory` | 搜索过滤：默认只搜提问；开关打开后也搜回答，且只有回答命中才标 `answerHit` |
 | `ownsComposerKey` | `Ctrl+R` / `Cmd+R` 的归属判定（纯函数；组件另有一条源码守卫，确保先检查焦点） |
 | `listCap` | R8 / R13：提问区上限（非预览 10 行、预览 5 行），与样式表行高一致 |
+| `previewBits` | R14：回答该不该显示（打开 / 设置开关 / 列表 / 有没有回复） |
+| `readReply` | R14：某条提问之后的回答，不会借用上一条的 |
 | `CSS` | R8 / R13：面板 / body / 列表 / 回答 / 提示行的 flex 分工（解析 CSS 断言） |
 | `apply`（直接调用） | R10：重复注册 locale 字典时插件仍然挂载，`Ctrl+R` 的浮层照常注册 |
 | `LocaleStub`（测试内） | R11：`subscribe` 依赖 `this`，裸传会让浮层渲染即崩 |
@@ -518,7 +567,7 @@ function createSettingsPage(ctx, store, useSettings, useLocaleRevision) {
 **改这些函数时，先跑测试；新增行为时，先写一条会在旧实现上失败的测试。**
 
 ```bash
-npm test          # 45 个测试（客户端 32 + 宿主 13）
+npm test          # 49 个测试（客户端 36 + 宿主 13）
 npm run check     # node --check
 ```
 

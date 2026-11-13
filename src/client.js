@@ -823,6 +823,27 @@ window.__ModuleLoader__.load({
       return { text: text.length > MAX_REPLY ? text.slice(0, MAX_REPLY) + '…' : text };
     }
 
+    /**
+     * What the answer is showing. `open` is what the key toggled and outlives
+     * a selection with no reply; `shown` is "an answer is on screen now": the
+     * answer is turned on, previews are enabled in Settings, there is a prompt
+     * to answer, and that prompt has a reply. One rule for the panel, the text
+     * that fills it, and the Space key.
+     *
+     * @param {{ open: boolean, enabled: boolean, matches: number, text: string | null }} state
+     * @returns {{ open: boolean, shown: boolean, canOpen: boolean }} `canOpen` is
+     *   whether a reply is waiting to be opened: what Space may turn on.
+     */
+    function previewBits({ open, enabled, matches, text }) {
+      const ready = enabled && matches > 0;
+      const answerable = typeof text === 'string' && text !== '';
+      return {
+        open,
+        shown: open && ready && answerable,
+        canOpen: ready && answerable,
+      };
+    }
+
     /** First match highlighted inside a collapsed preview. */
     function highlight(text, query) {
       const value = previewOf(text);
@@ -1572,6 +1593,8 @@ window.__ModuleLoader__.load({
         glideStep,
         panelHeight,
         listCap,
+        previewBits,
+        readReply,
         CSS,
       }),
       inject: ['slots', 'locale'],
@@ -1946,8 +1969,14 @@ window.__ModuleLoader__.load({
             const focus = anchor < 0 ? null : { offset: Math.max(0, anchor - shown.start) };
             return renderMarkdown(shown.text, { labels: codeLabels, focus });
           }, [previewText, codeLabels, previewAnchor]);
-          const previewShown = previewOpen && matches.length > 0;
-          const previewVisible = previewShown && allowPreview;
+          const preview = previewBits({
+            open: previewOpen,
+            enabled: allowPreview,
+            matches: matches.length,
+            text: previewText,
+          });
+          const previewShown = preview.shown;
+          const previewVisible = preview.shown;
           // The open panel is a share of the window, so a resize has to re-pin it.
           React.useEffect(() => {
             const onResize = () => setWindowTick((tick) => tick + 1);
@@ -2183,7 +2212,7 @@ window.__ModuleLoader__.load({
             const anchor = next === null ? null : matchAnchor(next, queryText.trim().toLowerCase());
             setPreviewAnchor(anchor);
             setPreviewText((previous) => (previous === next ? previous : next));
-          }, [previewOpen, matches, selected]);
+          }, [previewOpen, matches, selected, bind]);
 
           /** Cancel a preview scroll animation that is still running. */
           const stopPreviewScroll = () => {
@@ -2418,7 +2447,15 @@ window.__ModuleLoader__.load({
               if (matchesRef.current.length === 0) return;
               event.preventDefault();
               event.stopPropagation();
-              setPreviewOpen((open) => !open);
+              // Closes whatever is on screen (an empty answer included); opens
+              // only when a reply is waiting under the selection.
+              const next = previewBits({
+                open: previewOpen,
+                enabled: allowPreview,
+                matches: matchesRef.current.length,
+                text: previewText,
+              });
+              setPreviewOpen((open) => (open ? !preview.shown : next.canOpen));
               return;
             }
             if (pageDirection(key) !== 0) {

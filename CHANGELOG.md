@@ -56,6 +56,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Space opened an empty answer for a prompt that has no reply yet, and could
+  still open one with previews turned off in Settings.** The Space key, the
+  answer area and the reply lookup each decided "should the answer show" on
+  their own — the key only looked at the result count, the area ignored the
+  Settings switch. One rule (`previewBits`: turned on, allowed, a prompt
+  selected, and that prompt has a reply) now answers for all three: Space opens
+  only a waiting reply and closes whatever is on screen; an open answer
+  disappears when the selection moves to a prompt without one.
 - **The reply preview did not glide with the panel, and the glide was too
   quick.** Swapping replies with `↑` / `↓` snapped the panel to a new height
   (measured 55 → 224 → … → 281 while the panel had only reached 578). The panel

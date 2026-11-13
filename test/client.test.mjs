@@ -43,6 +43,8 @@ const {
   CSS,
   panelHeight: panelHeightOf,
   listCap: listCapOf,
+  previewBits: previewBitsOf,
+  readReply: readReplyOf,
 } = loadClient();
 
 /** The helpers run in a `vm` realm, so their plain objects are not this realm's prototypes. */
@@ -59,6 +61,8 @@ const filterHistory = (items, query, options) => filterHistoryOf(items, query, o
 const pagePlan = (...args) => ({ ...pagePlanOf(...args) });
 const panelHeight = (...args) => ({ ...panelHeightOf(...args) });
 const listCap = (...args) => listCapOf(...args);
+const previewBits = (...args) => previewBitsOf(...args);
+const readReply = (...args) => readReplyOf(...args);
 
 /** A locale service like the host's `LocaleRuntime`, minus the browser plumbing. */
 function localeService(initial = 'zh', dictionaries = {}) {
@@ -603,37 +607,87 @@ function css(rules, selector, property) {
 }
 
 /**
- * Lay out a column of flex items stacked from `start`, the way the panel's
- * `flex-direction: column` does: cap each item by `max-height`, give the free
- * space to `flex-grow`, then take the overflow back **only from items that may
- * shrink** (a shrink factor of 0 means they cannot) down to their `min-height`.
- * Whatever still does not fit spills past the bottom and is clipped.
+ * The answer area and the Space key: one rule, three surfaces.
+ *
+ * The Space key decides what the panel shows, the effect decides which reply
+ * text fills it, and the panel decides whether the area is drawn. They used to
+ * each hold a piece of that rule, so "a prompt with no reply yet" could open an
+ * empty answer and "previews off in Settings" could still be toggled on. The
+ * rule is `previewBits` now, and these tests pin the states a user can be in.
  */
-function column(items, growHeight) {
-  const rows = items.map((item) => ({
-    ...item,
-    shrink: item.shrink === true ? 1 : 0,
-    height: Math.min(item.max ?? Infinity, item.content),
-  }));
-  const free = growHeight - rows.reduce((sum, row) => sum + row.height, 0);
-  if (free > 0) {
-    const growers = rows.filter((row) => row.grow === true);
-    for (const row of growers) row.height += free / growers.length;
-  } else if (free < 0) {
-    let needed = -free;
-    for (const row of rows.filter((row) => row.shrink > 0)) {
-      const take = Math.min(needed, row.height - (row.min ?? 0));
-      row.height -= take;
-      needed -= take;
-    }
-  }
-  let top = 0;
-  return rows.map((row) => {
-    const box = { ...row, top };
-    top += row.height;
-    return box;
-  });
-}
+test('Space opens an answer only when a reply is waiting under the selection', () => {
+  const open = (state) => previewBits({ open: false, enabled: true, matches: 3, text: null, ...state }).canOpen;
+  // A prompt listed and its reply found: the answer opens.
+  assert.equal(open({ text: 'done' }), true);
+  // The selection is a prompt that has no reply yet: nothing to open.
+  assert.equal(open({ text: null }), false);
+  assert.equal(open({ text: '' }), false);
+  // No entries in the list at all (empty history, or a query that matches none).
+  assert.equal(open({ text: 'done', matches: 0 }), false);
+  // The answer is turned off in Settings: Space does nothing, and no area opens.
+  assert.equal(open({ text: 'done', enabled: false }), false);
+});
+
+test('the answer area follows the same rule as the key', () => {
+  const shown = (state) => previewBits({ open: true, enabled: true, matches: 3, text: 'done', ...state }).shown;
+  assert.equal(shown({}), true);
+  // Closed by Space…
+  assert.equal(shown({ open: false }), false);
+  // …or left open while the selection moves to a prompt without a reply: the
+  // area must disappear instead of showing an empty box.
+  assert.equal(shown({ text: null }), false);
+  // …or turned off in Settings while it is open.
+  assert.equal(shown({ enabled: false }), false);
+});
+
+/**
+ * The answer under the selection, as the panel looks it up. The row's text is
+ * the fallback when the snapshot was rebuilt and `seq` moved.
+ */
+test('the answer belongs to the selected prompt, never to its neighbour', () => {
+  const entries = [
+    { type: 'event', event: { type: 'user/message', seq: 1, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] } } },
+    { type: 'event', event: { type: 'assistant/message', seq: 2, data: { message: { content: [{ type: 'text', text: 'first answer' }] } } } },
+    { type: 'event', event: { type: 'user/message', seq: 3, data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] } } },
+  ];
+  const sessions = {
+    binding: () => ({
+      eventSource: { getSnapshot: () => ({ hasMore: false, entries }), subscribe: () => () => {} },
+      session: null,
+    }),
+  };
+  assert.equal(readReply(sessions, 's1', 1).text, 'first answer');
+  // A prompt with nothing after it has no reply, and does not borrow the one
+  // from the prompt before it.
+  assert.equal(readReply(sessions, 's1', 3), null);
+  // The snapshot was rebuilt and `seq` moved: the row's own text finds it.
+  assert.equal(readReply(sessions, 's1', 99, { text: 'first' }).text, 'first answer');
+  assert.equal(readReply(sessions, 's1', 99), null);
+});
+
+test('the panel and the Space key both read the one preview rule', () => {
+  const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
+  // One place toggles the answer, and it asks previewBits.
+  const toggles = source.match(/setPreviewOpen\(\(open\) => \(open[\s\S]*?\)\);/g) ?? [];
+  assert.equal(toggles.length, 1, 'one place toggles the answer');
+  // The toggle reads the rule's answer (`canOpen` / `shown`); the rule call
+  // itself sits just above the toggle.
+  assert.ok(/canOpen|preview\.shown/.test(toggles[0]), 'the key asks the rule instead of guessing: ' + toggles[0]);
+  const keyAt = source.indexOf("if ((key === ' ' || key === 'Spacebar')");
+  const toggleAt = source.indexOf('setPreviewOpen((open) =>');
+  assert.ok(keyAt > 0 && toggleAt > keyAt, 'the space handler holds the toggle');
+  const handler = source.slice(keyAt, toggleAt);
+  assert.ok(handler.includes('previewBits('), 'the space handler asks previewBits: ' + handler.trim());
+  // The panel derives `shown` (and with it `visible`) from that call, not from
+  // its own mix of `previewOpen` and the result count, which ignored Settings.
+  const shownAt = source.indexOf('const previewShown =');
+  const visibleAt = source.indexOf('const previewVisible =');
+  assert.ok(shownAt > 0 && visibleAt > shownAt, 'the panel defines previewShown then previewVisible');
+  const rule = source.slice(shownAt, visibleAt);
+  assert.ok(rule.includes('preview.shown'), 'previewShown comes from previewBits: ' + rule.trim());
+  assert.ok(!/previewOpen && matches\.length > 0/.test(rule), 'the panel does not re-derive the rule from previewOpen');
+  assert.ok(!/previewOpen && matches\.length > 0/.test(source), 'no surface keeps the old rule beside previewBits');
+});
 
 /**
  * R9 — the panel must not snap to a new height while `↑` / `↓` swap replies.
@@ -677,12 +731,6 @@ test('the panel glides between replies as a pixel height (R9)', () => {
     { height: 630, animate: false });
 });
 
-/**
- * R9, second half: a reply swap must change the preview's content height, never
- * its ceiling. A ceiling in an absolute unit (`min(46vh,320px)`) re-snaps the
- * panel whenever a short reply follows a long one; a share of the panel does
- * not move as the reply does.
- */
 /**
 test('the answer region takes what the list and the hint row leave (R8/R9)', () => {
   // Three blocks in one column. The first and the last are fixed; the answer is
